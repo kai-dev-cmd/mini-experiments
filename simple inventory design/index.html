@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Your Shop</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #000;
+        font-family: Arial, sans-serif;
+      }
+
+      .panel {
+        position: absolute;
+        background: #fff;
+        color: #111;
+        border-radius: 8px;
+        box-sizing: border-box;
+      }
+
+      .panel-header {
+        padding: 10px 12px;
+        font-weight: 700;
+        border-bottom: 1px solid #ddd;
+        cursor: move;
+        user-select: none;
+      }
+
+      .panel-body {
+        padding: 12px;
+      }
+
+      #mainPanel {
+        width: min(860px, 95vw);
+        left: 60px;
+        top: 60px;
+      }
+
+      #infoPanel {
+        width: min(360px, 90vw);
+        left: 60px;
+        top: 520px;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .top-bar {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .tab.active {
+        font-weight: 700;
+      }
+
+      .table-head,
+      .row {
+        display: grid;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .table-head.inventory,
+      .row.inventory {
+        grid-template-columns: 1fr 120px 140px 120px 90px 150px;
+      }
+
+      .table-head.recipes,
+      .row.recipes {
+        grid-template-columns: 1fr 120px 140px 90px 150px;
+      }
+
+      .table-head {
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+
+      .row {
+        padding: 8px;
+        border-radius: 6px;
+        margin-bottom: 6px;
+      }
+
+      .stock-zero {
+        background: #fee2e2;
+      }
+
+      .stock-low {
+        background: #fef9c3;
+      }
+
+      .status.zero {
+        color: #b91c1c;
+      }
+
+      .status.low {
+        color: #854d0e;
+      }
+
+      .qty {
+        display: inline-flex;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .summary-line {
+        margin-bottom: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="mainPanel" class="panel">
+      <div class="panel-header">Your Shop</div>
+      <div id="mainBody" class="panel-body"></div>
+    </div>
+
+    <div id="infoPanel" class="panel hidden">
+      <div class="panel-header">Info</div>
+      <div id="infoBody" class="panel-body"></div>
+    </div>
+
+    <script>
+      const state = {
+        cash: 100,
+        items: {
+          milk: 0,
+          beans: 0,
+        },
+        products: {
+          coffee: 0,
+        },
+        ui: {
+          activeTab: "inventory",
+          purchaseQty: { milk: 0, beans: 0 },
+          recipeQty: 0,
+        },
+      };
+
+      const PRICES = { milk: 8, beans: 15 };
+      const COFFEE_PER_RECIPE = 5;
+
+      const mainBodyEl = document.getElementById("mainBody");
+      const infoBodyEl = document.getElementById("infoBody");
+      const mainPanelEl = document.getElementById("mainPanel");
+      const infoPanelEl = document.getElementById("infoPanel");
+
+      let tickIntervalId = null;
+
+      function stockMeta(stock) {
+        if (stock === 0) {
+          return { rowClass: "stock-zero", statusClass: "zero", status: "Out of Stock" };
+        }
+        if (stock <= 3) {
+          return { rowClass: "stock-low", statusClass: "low", status: "Low Stock" };
+        }
+        return { rowClass: "", statusClass: "", status: "" };
+      }
+
+      function renderInventoryContent() {
+        const rows = [
+          { key: "milk", label: "Milk" },
+          { key: "beans", label: "Coffee Beans" },
+        ]
+          .map(({ key, label }) => {
+            const stock = state.items[key];
+            const qty = state.ui.purchaseQty[key];
+            const totalPrice = qty * PRICES[key];
+            const canBuy = qty > 0 && state.cash >= totalPrice;
+            const meta = stockMeta(stock);
+
+            return `
+              <div class="row inventory ${meta.rowClass}">
+                <div>${label}</div>
+                <div>${stock}</div>
+                <div class="qty">
+                  <button data-action="purchase-dec" data-item="${key}">-</button>
+                  <span>${qty}</span>
+                  <button data-action="purchase-inc" data-item="${key}">+</button>
+                </div>
+                <div>$${totalPrice}</div>
+                <div>
+                  <button data-action="buy" data-item="${key}" ${canBuy ? "" : "disabled"}>Buy</button>
+                </div>
+                <div class="status ${meta.statusClass}">${meta.status}</div>
+              </div>
+            `;
+          })
+          .join("");
+
+        return `
+          <div class="table-head inventory">
+            <div>Item</div>
+            <div>Stock</div>
+            <div>Qty (-/+)</div>
+            <div>Total Price</div>
+            <div>Buy</div>
+            <div></div>
+          </div>
+          ${rows}
+        `;
+      }
+
+      function renderRecipesContent() {
+        const coffeeStock = state.products.coffee;
+        const qty = state.ui.recipeQty;
+        const enoughIngredients = state.items.milk >= qty && state.items.beans >= qty;
+        const canMake = qty > 0 && enoughIngredients;
+        const meta = stockMeta(coffeeStock);
+
+        return `
+          <div class="table-head recipes">
+            <div>Product</div>
+            <div>Stock</div>
+            <div>Qty (-/+)</div>
+            <div>Make</div>
+            <div></div>
+          </div>
+
+          <div class="row recipes ${meta.rowClass}">
+            <div>Coffee</div>
+            <div>${coffeeStock}</div>
+            <div class="qty">
+              <button data-action="recipe-dec">-</button>
+              <span>${qty}</span>
+              <button data-action="recipe-inc">+</button>
+            </div>
+            <div>
+              <button data-action="make" ${canMake ? "" : "disabled"}>Make</button>
+            </div>
+            <div class="status ${meta.statusClass}">${meta.status}</div>
+          </div>
+        `;
+      }
+
+      function render() {
+        const profitPerSecond = 1 + state.products.coffee;
+        const inventoryTabClass = state.ui.activeTab === "inventory" ? "tab active" : "tab";
+        const recipesTabClass = state.ui.activeTab === "recipes" ? "tab active" : "tab";
+
+        mainBodyEl.innerHTML = `
+          <div class="top-bar">
+            <div>Cash: $${state.cash}</div>
+            <div>Profit per second: $${profitPerSecond}</div>
+            <button data-action="toggle-info">Info</button>
+          </div>
+
+          <div class="tabs">
+            <button class="${inventoryTabClass}" data-action="tab" data-tab="inventory">Inventory</button>
+            <button class="${recipesTabClass}" data-action="tab" data-tab="recipes">Recipes</button>
+          </div>
+
+          <div>
+            ${state.ui.activeTab === "inventory" ? renderInventoryContent() : renderRecipesContent()}
+          </div>
+        `;
+
+        infoBodyEl.innerHTML = `
+          <div class="summary-line">
+            <button data-action="close-info">X</button>
+          </div>
+          <div class="summary-line">Current recipe:</div>
+          <div class="summary-line">1 Milk + 1 Coffee Bean → 5 Coffee</div>
+          <div class="summary-line">Total Coffee: ${state.products.coffee}</div>
+          <div class="summary-line">Current profit per second: $${profitPerSecond}</div>
+        `;
+      }
+
+      function handleMainClick(event) {
+        const target = event.target.closest("[data-action]");
+        if (!target) return;
+
+        const action = target.dataset.action;
+
+        if (action === "toggle-info") {
+          infoPanelEl.classList.toggle("hidden");
+          return;
+        }
+
+        if (action === "tab") {
+          const tab = target.dataset.tab;
+          if (tab === "inventory" || tab === "recipes") {
+            state.ui.activeTab = tab;
+            render();
+          }
+          return;
+        }
+
+        if (action === "purchase-inc") {
+          const item = target.dataset.item;
+          if (item === "milk" || item === "beans") {
+            state.ui.purchaseQty[item] += 1;
+            render();
+          }
+          return;
+        }
+
+        if (action === "purchase-dec") {
+          const item = target.dataset.item;
+          if (item === "milk" || item === "beans") {
+            state.ui.purchaseQty[item] = Math.max(0, state.ui.purchaseQty[item] - 1);
+            render();
+          }
+          return;
+        }
+
+        if (action === "buy") {
+          const item = target.dataset.item;
+          if (item !== "milk" && item !== "beans") return;
+
+          const qty = state.ui.purchaseQty[item];
+          const total = qty * PRICES[item];
+          if (qty <= 0 || total > state.cash) return;
+
+          state.items[item] += qty;
+          state.cash -= total;
+          state.ui.purchaseQty[item] = 0;
+          render();
+          return;
+        }
+
+        if (action === "recipe-inc") {
+          state.ui.recipeQty += 1;
+          render();
+          return;
+        }
+
+        if (action === "recipe-dec") {
+          state.ui.recipeQty = Math.max(0, state.ui.recipeQty - 1);
+          render();
+          return;
+        }
+
+        if (action === "make") {
+          const qty = state.ui.recipeQty;
+          if (qty <= 0) return;
+          if (state.items.milk < qty || state.items.beans < qty) return;
+
+          state.items.milk -= qty;
+          state.items.beans -= qty;
+          state.products.coffee += qty * COFFEE_PER_RECIPE;
+          state.ui.recipeQty = 0;
+          render();
+        }
+      }
+
+      function handleInfoClick(event) {
+        const target = event.target.closest("[data-action]");
+        if (!target) return;
+
+        if (target.dataset.action === "close-info") {
+          infoPanelEl.classList.add("hidden");
+        }
+      }
+
+      function makePanelDraggable(panelEl) {
+        const header = panelEl.querySelector(".panel-header");
+        let dragging = false;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        header.addEventListener("mousedown", (event) => {
+          dragging = true;
+          offsetX = event.clientX - panelEl.offsetLeft;
+          offsetY = event.clientY - panelEl.offsetTop;
+        });
+
+        document.addEventListener("mousemove", (event) => {
+          if (!dragging) return;
+          panelEl.style.left = `${event.clientX - offsetX}px`;
+          panelEl.style.top = `${event.clientY - offsetY}px`;
+        });
+
+        document.addEventListener("mouseup", () => {
+          dragging = false;
+        });
+      }
+
+      function startSystemLoop() {
+        if (tickIntervalId !== null) return;
+        tickIntervalId = setInterval(() => {
+          state.cash += 1 + state.products.coffee * 1;
+          render();
+        }, 1000);
+      }
+
+      function init() {
+        mainBodyEl.addEventListener("click", handleMainClick);
+        infoBodyEl.addEventListener("click", handleInfoClick);
+        makePanelDraggable(mainPanelEl);
+        makePanelDraggable(infoPanelEl);
+        startSystemLoop();
+        render();
+      }
+
+      init();
+    </script>
+  </body>
+</html>
