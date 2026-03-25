@@ -79,7 +79,7 @@
 
       .table-head.recipes,
       .row.recipes {
-        grid-template-columns: 1fr 120px 140px 90px 150px;
+        grid-template-columns: 1fr 90px 120px 140px 90px 150px;
       }
 
       .table-head {
@@ -117,6 +117,18 @@
 
       .summary-line {
         margin-bottom: 8px;
+      }
+
+      button {
+        background: black;
+        color: white;
+        border: none;
+        padding: 4px 8px;
+      }
+
+      .profit-value {
+        color: #22c55e;
+        font-weight: bold;
       }
 
       .btn-green {
@@ -159,7 +171,10 @@
     </div>
 
     <div id="infoPanel" class="panel hidden">
-      <div class="panel-header">Info</div>
+      <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center">
+        <span>Info</span>
+        <button data-action="close-info">X</button>
+      </div>
       <div id="infoBody" class="panel-body"></div>
     </div>
 
@@ -190,6 +205,57 @@
 
       let tickIntervalId = null;
       let depletionTick = 0;
+      let quickInfoPopupEl = null;
+      let quickInfoCountdownIntervalId = null;
+      let quickInfoCloseTimeoutId = null;
+
+      function removeQuickInfoPopup() {
+        if (quickInfoCountdownIntervalId !== null) {
+          clearInterval(quickInfoCountdownIntervalId);
+          quickInfoCountdownIntervalId = null;
+        }
+
+        if (quickInfoCloseTimeoutId !== null) {
+          clearTimeout(quickInfoCloseTimeoutId);
+          quickInfoCloseTimeoutId = null;
+        }
+
+        if (quickInfoPopupEl) {
+          quickInfoPopupEl.remove();
+          quickInfoPopupEl = null;
+        }
+      }
+
+      function showQuickInfoPopup() {
+        removeQuickInfoPopup();
+
+        quickInfoPopupEl = document.createElement("div");
+        quickInfoPopupEl.style.position = "fixed";
+        quickInfoPopupEl.style.left = "50%";
+        quickInfoPopupEl.style.top = "50%";
+        quickInfoPopupEl.style.transform = "translate(-50%, -50%)";
+        quickInfoPopupEl.style.background = "#fff";
+        quickInfoPopupEl.style.color = "#111";
+        quickInfoPopupEl.style.padding = "12px";
+        quickInfoPopupEl.style.borderRadius = "8px";
+        quickInfoPopupEl.style.zIndex = "9999";
+        quickInfoPopupEl.innerHTML = "<div>Ingredients:</div><div>Milk + Coffee Beans</div><div id=\"quickInfoCountdown\" style=\"margin-top:8px\">Closes in 5s</div>";
+
+        document.body.appendChild(quickInfoPopupEl);
+
+        let secondsLeft = 5;
+        quickInfoCountdownIntervalId = setInterval(() => {
+          secondsLeft -= 1;
+          const countdownEl = quickInfoPopupEl ? quickInfoPopupEl.querySelector("#quickInfoCountdown") : null;
+          if (countdownEl) {
+            countdownEl.textContent = `Closes in ${Math.max(0, secondsLeft)}s`;
+          }
+        }, 1000);
+
+        quickInfoCloseTimeoutId = setTimeout(() => {
+          removeQuickInfoPopup();
+        }, 5000);
+      }
 
       function stockMeta(stock) {
         if (stock === 0) {
@@ -236,7 +302,7 @@
           <div class="table-head inventory">
             <div>Item</div>
             <div>Stock</div>
-            <div>Qty (-/+)</div>
+            <div>Qty</div>
             <div>Total Price</div>
             <div>Buy</div>
             <div></div>
@@ -255,14 +321,16 @@
         return `
           <div class="table-head recipes">
             <div>Product</div>
+            <div>Profit</div>
             <div>Stock</div>
-            <div>Qty (-/+)</div>
+            <div>Qty</div>
             <div>Make</div>
             <div></div>
           </div>
 
           <div class="row recipes ${meta.rowClass}">
-            <div>Coffee</div>
+            <div>Coffee <button data-action="quick-info">i</button></div>
+            <div>$5/sec</div>
             <div>${coffeeStock}</div>
             <div class="qty">
               <button data-action="recipe-dec">-</button>
@@ -279,13 +347,17 @@
 
       function render() {
         const profitPerSecond = 1 + state.products.coffee;
+        const costPerBatch = 23;
+        const batchOutput = 5;
+        const batchProfitPerSecond = 5;
+        const breakEvenSeconds = Math.round(costPerBatch / batchProfitPerSecond);
         const inventoryTabClass = state.ui.activeTab === "inventory" ? "tab active" : "tab";
         const recipesTabClass = state.ui.activeTab === "recipes" ? "tab active" : "tab";
 
         mainBodyEl.innerHTML = `
           <div class="top-bar">
             <div>Cash: $${state.cash}</div>
-            <div>Profit per second: $${profitPerSecond}</div>
+            <div>Profit per second: <span class="profit-value">$${profitPerSecond}</span></div>
             <button data-action="toggle-info">Info</button>
           </div>
 
@@ -300,13 +372,12 @@
         `;
 
         infoBodyEl.innerHTML = `
-          <div class="summary-line">
-            <button data-action="close-info">X</button>
-          </div>
-          <div class="summary-line">Current recipe:</div>
-          <div class="summary-line">1 Milk + 1 Coffee Bean → 5 Coffee</div>
+          <div class="summary-line">📊 Summary</div>
           <div class="summary-line">Total Coffee: ${state.products.coffee}</div>
-          <div class="summary-line">Current profit per second: $${profitPerSecond}</div>
+          <div class="summary-line">Profit/sec: $${profitPerSecond}</div>
+          <div class="summary-line">☕ Coffee</div>
+          <div class="summary-line">1 Milk + 1 Coffee Bean → +5 coffee</div>
+          <div class="summary-line">Cost: $${costPerBatch} | Break-even: ~${breakEvenSeconds}s</div>
         `;
       }
 
@@ -318,6 +389,11 @@
 
         if (action === "toggle-info") {
           infoPanelEl.classList.toggle("hidden");
+          return;
+        }
+
+        if (action === "quick-info") {
+          showQuickInfoPopup();
           return;
         }
 
@@ -364,6 +440,8 @@
         }
 
         if (action === "recipe-inc") {
+          const maxMake = Math.min(state.items.milk, state.items.beans);
+          if (state.ui.recipeQty >= maxMake) return;
           state.ui.recipeQty += 1;
           render();
           return;
@@ -444,7 +522,7 @@
 
       function init() {
         mainBodyEl.addEventListener("click", handleMainClick);
-        infoBodyEl.addEventListener("click", handleInfoClick);
+        infoPanelEl.addEventListener("click", handleInfoClick);
         makePanelDraggable(mainPanelEl);
         makePanelDraggable(infoPanelEl);
         startSystemLoop();
