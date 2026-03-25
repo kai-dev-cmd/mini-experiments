@@ -118,6 +118,38 @@
       .summary-line {
         margin-bottom: 8px;
       }
+
+      .btn-green {
+        background: #22c55e;
+        color: white;
+      }
+
+      .btn-red {
+        background: #ef4444;
+        color: white;
+      }
+
+      .shake {
+        animation: shake 0.3s;
+      }
+
+      @keyframes shake {
+        0% {
+          transform: translateX(0);
+        }
+        25% {
+          transform: translateX(-4px);
+        }
+        50% {
+          transform: translateX(4px);
+        }
+        75% {
+          transform: translateX(-4px);
+        }
+        100% {
+          transform: translateX(0);
+        }
+      }
     </style>
   </head>
   <body>
@@ -157,6 +189,7 @@
       const infoPanelEl = document.getElementById("infoPanel");
 
       let tickIntervalId = null;
+      let depletionTick = 0;
 
       function stockMeta(stock) {
         if (stock === 0) {
@@ -237,7 +270,7 @@
               <button data-action="recipe-inc">+</button>
             </div>
             <div>
-              <button data-action="make" ${canMake ? "" : "disabled"}>Make</button>
+              <button data-action="make" class="${canMake ? "btn-green" : "btn-red"}">Make</button>
             </div>
             <div class="status ${meta.statusClass}">${meta.status}</div>
           </div>
@@ -344,8 +377,14 @@
 
         if (action === "make") {
           const qty = state.ui.recipeQty;
-          if (qty <= 0) return;
-          if (state.items.milk < qty || state.items.beans < qty) return;
+          const isValid = qty > 0 && state.items.milk >= qty && state.items.beans >= qty;
+          if (!isValid) {
+            target.classList.add("shake");
+            setTimeout(() => {
+              target.classList.remove("shake");
+            }, 300);
+            return;
+          }
 
           state.items.milk -= qty;
           state.items.beans -= qty;
@@ -390,6 +429,14 @@
       function startSystemLoop() {
         if (tickIntervalId !== null) return;
         tickIntervalId = setInterval(() => {
+          depletionTick += 1;
+          if (depletionTick >= 2) {
+            if (state.products.coffee > 0) {
+              state.products.coffee -= 1;
+            }
+            depletionTick = 0;
+          }
+
           state.cash += 1 + state.products.coffee * 1;
           render();
         }, 1000);
