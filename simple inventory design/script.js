@@ -44,8 +44,8 @@ let tickIntervalId = null;
 let depletionTick = 0;
 let quickInfoPopupEl = null;
 let quickInfoCloseTimeoutId = null;
-let missingIngredientsPopupEl = null;
-let missingIngredientsTimeoutId = null;
+let purchaseBlockedPopupEl = null;
+let purchaseBlockedTimeoutId = null;
 
 // popup state
 function removeQuickInfoPopup() {
@@ -67,13 +67,14 @@ function removeQuickInfoPopup() {
 function showQuickInfoPopup(product = "coffee") {
   removeQuickInfoPopup();
 
-  const ingredients = product === "matchaLatte" ? "Milk + Matcha" : "Milk + Coffee Beans";
+  const ingredients =
+    product === "matchaLatte" ? "Milk + Matcha" : "Milk + Coffee Beans";
 
   quickInfoPopupEl = document.createElement("div");
-  quickInfoPopupEl.style = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#fff;color:#111;padding:12px;border-radius:8px;z-index:9999;";
+  quickInfoPopupEl.style =
+    "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#fff;color:#111;padding:12px;border-radius:8px;z-index:9999;";
   quickInfoPopupEl.className = "quick-info-popup";
-  quickInfoPopupEl.innerHTML =
-    `<div>Ingredients:</div><div>${ingredients}</div><div class="popup-bar-container"><div class="popup-bar"></div></div>`;
+  quickInfoPopupEl.innerHTML = `<div>Ingredients:</div><div>${ingredients}</div><div class="popup-bar-container"><div class="popup-bar"></div></div>`;
 
   document.body.appendChild(quickInfoPopupEl);
 
@@ -87,37 +88,38 @@ function showQuickInfoPopup(product = "coffee") {
   quickInfoCloseTimeoutId = setTimeout(removeQuickInfoPopup, 5000);
 }
 
-// missing ingredients popup
-function removeMissingIngredientsPopup() {
-  if (missingIngredientsTimeoutId !== null) {
-    clearTimeout(missingIngredientsTimeoutId);
-    missingIngredientsTimeoutId = null;
+// purchase block popup
+function removepurchaseBlockedPopup() {
+  if (purchaseBlockedTimeoutId !== null) {
+    clearTimeout(purchaseBlockedTimeoutId);
+    purchaseBlockedTimeoutId = null;
   }
-  if (missingIngredientsPopupEl) {
-    missingIngredientsPopupEl.remove();
-    missingIngredientsPopupEl = null;
+  if (purchaseBlockedPopupEl) {
+    purchaseBlockedPopupEl.remove();
+    purchaseBlockedPopupEl = null;
   }
 }
 
-function showMissingIngredientsPopup(product = "coffee") {
-  removeMissingIngredientsPopup();
+function showpurchaseBlockedPopup(product = "coffee") {
+  removepurchaseBlockedPopup();
 
-  const needText = product === "matchaLatte" ? "(need milk + matcha)" : "(need milk + beans)";
+  const needText =
+    product === "matchaLatte" ? "(need milk + matcha)" : "(need milk + beans)";
 
-  missingIngredientsPopupEl = document.createElement("div");
-  missingIngredientsPopupEl.style = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#ef4444;color:#fff;padding:10px 12px;border-radius:6px;z-index:9999;";
-  missingIngredientsPopupEl.innerHTML =
-    `<div>Missing ingredients</div><div>${needText}</div><div class="popup-bar-container"><div class="popup-bar"></div></div>`;
+  purchaseBlockedPopupEl = document.createElement("div");
+  purchaseBlockedPopupEl.style =
+    "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#ef4444;color:#fff;padding:10px 12px;border-radius:6px;z-index:9999;";
+  purchaseBlockedPopupEl.innerHTML = `<div>Not enough money to purchase</div><div>${needText}</div><div class="popup-bar-container"><div class="popup-bar"></div></div>`;
 
-  document.body.appendChild(missingIngredientsPopupEl);
+  document.body.appendChild(purchaseBlockedPopupEl);
 
-  const bar = missingIngredientsPopupEl.querySelector(".popup-bar");
+  const bar = purchaseBlockedPopupEl.querySelector(".popup-bar");
   if (bar) {
     bar.style.transitionDuration = "5s";
     setTimeout(() => (bar.style.width = "0%"), 0);
   }
 
-  missingIngredientsTimeoutId = setTimeout(removeMissingIngredientsPopup, 5000);
+  purchaseBlockedTimeoutId = setTimeout(removepurchaseBlockedPopup, 5000);
 }
 
 // ======================
@@ -126,8 +128,14 @@ function showMissingIngredientsPopup(product = "coffee") {
 
 // returns UI status based on stock level
 function stockMeta(stock) {
-  if (stock === 0) return { rowClass: "stock-zero", statusClass: "zero", status: "Out of Stock" };
-  if (stock <= 3) return { rowClass: "stock-low", statusClass: "low", status: "Low Stock" };
+  if (stock === 0)
+    return {
+      rowClass: "stock-zero",
+      statusClass: "zero",
+      status: "Out of Stock",
+    };
+  if (stock <= 3)
+    return { rowClass: "stock-low", statusClass: "low", status: "Low Stock" };
   return { rowClass: "", statusClass: "", status: "" };
 }
 
@@ -189,8 +197,14 @@ function renderRecipesContent() {
   const matchaLatteQty = state.recipes.matchaLatte.qty;
   const coffeeTotalCost = coffeeQty * (PRICES.milk + PRICES.beans);
   const matchaTotalCost = matchaLatteQty * (PRICES.milk + PRICES.matcha);
-  const canMakeCoffee = coffeeQty > 0 && state.items.milk >= coffeeQty && state.items.beans >= coffeeQty;
-  const canMakeMatchaLatte = matchaLatteQty > 0 && state.items.milk >= matchaLatteQty && state.items.matcha >= matchaLatteQty;
+  const canMakeCoffee =
+    coffeeQty > 0 &&
+    state.items.milk >= coffeeQty &&
+    state.items.beans >= coffeeQty;
+  const canMakeMatchaLatte =
+    matchaLatteQty > 0 &&
+    state.items.milk >= matchaLatteQty &&
+    state.items.matcha >= matchaLatteQty;
   const coffeeMeta = stockMeta(coffeeStock);
   const matchaMeta = stockMeta(matchaLatteStock);
 
@@ -247,8 +261,10 @@ function render() {
   const breakEvenSeconds = Math.round(costPerBatch / batchProfitPerSecond);
   const matchaLatteCostPerBatch = PRICES.milk + PRICES.matcha;
 
-  const inventoryTabClass = state.ui.activeTab === "inventory" ? "tab active" : "tab";
-  const recipesTabClass = state.ui.activeTab === "recipes" ? "tab active" : "tab";
+  const inventoryTabClass =
+    state.ui.activeTab === "inventory" ? "tab active" : "tab";
+  const recipesTabClass =
+    state.ui.activeTab === "recipes" ? "tab active" : "tab";
 
   mainBodyEl.innerHTML = `
     <div class="top-bar">
@@ -312,8 +328,16 @@ function handleMainClick(event) {
   // increase purchase qty
   if (action === "purchase-inc") {
     const item = target.dataset.item;
-    state.ui.purchaseQty[item]++;
-    render();
+    const nextQty = state.ui.purchaseQty[item] + 1;
+    const nextTotal = nextQty * PRICES[item];
+
+    if (state.cash >= nextTotal) {
+      state.ui.purchaseQty[item] = nextQty;
+      render();
+    } else {
+    showpurchaseBlockedPopup();
+  }
+
     return;
   }
 
@@ -354,7 +378,7 @@ function handleMainClick(event) {
         state.recipes[product].qty++;
         render();
       } else {
-        showMissingIngredientsPopup("matchaLatte");
+        showpurchaseBlockedPopup("matchaLatte");
       }
     } else {
       const nextQty = state.recipes[product].qty + 1;
@@ -368,7 +392,7 @@ function handleMainClick(event) {
         state.recipes[product].qty++;
         render();
       } else {
-        showMissingIngredientsPopup("coffee");
+        showpurchaseBlockedPopup("coffee");
       }
     }
     return;
@@ -392,7 +416,8 @@ function handleMainClick(event) {
     if (product === "matchaLatte") {
       const missingMilk = Math.max(0, qty - state.items.milk);
       const missingMatcha = Math.max(0, qty - state.items.matcha);
-      const autoBuyCost = missingMilk * PRICES.milk + missingMatcha * PRICES.matcha;
+      const autoBuyCost =
+        missingMilk * PRICES.milk + missingMatcha * PRICES.matcha;
 
       if (autoBuyCost > 0) {
         if (state.cash >= autoBuyCost) {
@@ -400,7 +425,7 @@ function handleMainClick(event) {
           state.items.matcha += missingMatcha;
           state.cash -= autoBuyCost;
         } else {
-          showMissingIngredientsPopup("matchaLatte");
+          showpurchaseBlockedPopup("matchaLatte");
           return;
         }
       }
@@ -412,7 +437,7 @@ function handleMainClick(event) {
         state.recipes[product].qty = 0;
         render();
       } else {
-        showMissingIngredientsPopup("matchaLatte");
+        showpurchaseBlockedPopup("matchaLatte");
       }
     } else {
       if (qty > 0 && state.items.milk >= qty && state.items.beans >= qty) {
@@ -422,7 +447,7 @@ function handleMainClick(event) {
         state.recipes[product].qty = 0;
         render();
       } else {
-        showMissingIngredientsPopup("coffee");
+        showpurchaseBlockedPopup("coffee");
       }
     }
   }
@@ -439,7 +464,9 @@ function handleInfoClick(event) {
 // ======================
 function makePanelDraggable(panelEl) {
   const header = panelEl.querySelector(".panel-header");
-  let dragging = false, offsetX = 0, offsetY = 0;
+  let dragging = false,
+    offsetX = 0,
+    offsetY = 0;
 
   header.addEventListener("mousedown", (e) => {
     dragging = true;
