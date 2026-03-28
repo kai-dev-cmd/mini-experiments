@@ -12,6 +12,10 @@ const state = {
     coffee: 0,
     matchaLatte: 0,
   },
+  sellTimers: {
+    coffee: null,
+    matchaLatte: null,
+  },
   ui: {
     activeTab: "inventory",
     purchaseQty: { milk: 0, beans: 0, matcha: 0 },
@@ -221,7 +225,10 @@ function renderRecipesContent() {
     <div class="row recipes ${coffeeMeta.rowClass}">
       <div>Coffee <button data-action="quick-info" data-product="coffee">i</button></div>
       <div>$5/sec</div>
-      <div class="text-center">${coffeeStock}</div>
+      <div class="text-center">
+      ${coffeeStock}
+      <div class="sell-progress ${coffeeStock > 0 ? "active" : ""}"></div>
+</div>
       <div class="qty">
         <button data-action="recipe-dec" data-product="coffee">-</button>
         <span>${coffeeQty}</span>
@@ -237,7 +244,10 @@ function renderRecipesContent() {
     <div class="row recipes ${matchaMeta.rowClass}">
       <div>Matcha Latte <button data-action="quick-info" data-product="matchaLatte">i</button></div>
       <div>$12/sec</div>
-      <div class="text-center">${matchaLatteStock}</div>
+      <div class="text-center">
+      ${matchaLatteStock}
+      <div class="sell-progress ${matchaLatteStock > 0 ? "active" : ""}"></div>
+</div>
       <div class="qty">
         <button data-action="recipe-dec" data-product="matchaLatte">-</button>
         <span>${matchaLatteQty}</span>
@@ -284,17 +294,21 @@ function render() {
   `;
 
   infoBodyEl.innerHTML = `
-    <div class="summary-line">📊 Summary</div>
-    <div class="summary-line">Total Coffee: ${state.products.coffee}</div>
-    <div class="summary-line">Total Matcha Latte: ${state.products.matchaLatte}</div>
-    <div class="summary-line">Profit/sec: $${profitPerSecond}</div>
-    <div class="summary-line">☕ Coffee</div>
-    <div class="summary-line">1 Milk + 1 Coffee Bean → +5 coffee</div>
-    <div class="summary-line">Cost: $${costPerBatch} | Break-even: ~${breakEvenSeconds}s</div>
-    <div class="summary-line">🍵 Matcha Latte</div>
-    <div class="summary-line">1 Milk + 1 Matcha → +5 matcha latte</div>
-    <div class="summary-line">Cost: $${matchaLatteCostPerBatch}</div>
-  `;
+  <div class="summary-line"><strong>📊 Summary</strong></div>
+  <div class="summary-line">Total Coffee: ${state.products.coffee}</div>
+  <div class="summary-line">Total Matcha Latte: ${state.products.matchaLatte}</div>
+  <div class="summary-line">Profit/sec: $${profitPerSecond}</div>
+
+  <div class="summary-line" style="margin-top:12px;"><strong>☕ Coffee</strong></div>
+  <div class="summary-line">1 Milk + 1 Coffee Bean → +1 Coffee</div>
+  <div class="summary-line">Cost: $19</div>
+  <div class="summary-line">Sell: +$5 every 2s</div>
+
+  <div class="summary-line" style="margin-top:12px;"><strong>🍵 Matcha Latte</strong></div>
+  <div class="summary-line">1 Milk + 1 Matcha → +1 Matcha Latte</div>
+  <div class="summary-line">Cost: $22</div>
+  <div class="summary-line">Sell: +$12 every 2s</div>
+`;
 }
 
 // ======================
@@ -434,7 +448,11 @@ function handleMainClick(event) {
         state.items.milk -= qty;
         state.items.matcha -= qty;
         state.products.matchaLatte += qty * MATCHA_LATTE_PER_RECIPE;
+        console.log("MAKE CLICK MATCHA", Date.now());
         state.recipes[product].qty = 0;
+        if (state.sellTimers[product] === null) {
+          state.sellTimers[product] = Date.now() + 2000;
+        }
         render();
       } else {
         showpurchaseBlockedPopup("matchaLatte");
@@ -460,7 +478,11 @@ function handleMainClick(event) {
         state.items.milk -= qty;
         state.items.beans -= qty;
         state.products.coffee += qty * COFFEE_PER_RECIPE;
+        console.log("MAKE CLICK COFFEE", Date.now());
         state.recipes[product].qty = 0;
+        if (state.sellTimers[product] === null) {
+          state.sellTimers[product] = Date.now() + 2000;
+        }
         render();
       } else {
         showpurchaseBlockedPopup("coffee");
@@ -506,18 +528,45 @@ function startSystemLoop() {
   if (tickIntervalId) return;
 
   tickIntervalId = setInterval(() => {
-    if (state.products.coffee > 0) {
+    let didSell = false;
+    const now = Date.now();
+
+    if (
+      state.products.coffee > 0 &&
+      state.sellTimers.coffee !== null &&
+      now >= state.sellTimers.coffee
+    ) {
       state.cash += 5;
       state.products.coffee--;
+      didSell = true;
+
+      if (state.products.coffee > 0) {
+        state.sellTimers.coffee = Date.now() + 2000;
+      } else {
+        state.sellTimers.coffee = null;
+      }
     }
 
-    if (state.products.matchaLatte > 0) {
+    if (
+      state.products.matchaLatte > 0 &&
+      state.sellTimers.matchaLatte !== null &&
+      now >= state.sellTimers.matchaLatte
+    ) {
       state.cash += 12;
       state.products.matchaLatte--;
+      didSell = true;
+
+      if (state.products.matchaLatte > 0) {
+        state.sellTimers.matchaLatte = Date.now() + 2000;
+      } else {
+        state.sellTimers.matchaLatte = null;
+      }
     }
 
-    render();
-  }, 2000);
+    if (didSell) {
+      render();
+    }
+  }, 250);
 }
 
 // ======================

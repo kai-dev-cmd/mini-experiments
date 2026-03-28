@@ -200,3 +200,35 @@ button {
   75% { transform: translateX(-4px); }
   100% { transform: translateX(0); }
 }
+  
+.sell-progress {
+  height: 4px;
+  width: 100%;
+  background: rgba(239, 68, 68, 0.15);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 4px;
+  position: relative;
+}
+
+.sell-progress::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: #ef4444;
+  transform-origin: left;
+  transform: scaleX(1);
+}
+
+.sell-progress.active::after {
+  animation: sellCountdown 2s linear infinite;
+}
+
+@keyframes sellCountdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
