@@ -25,9 +25,9 @@ const state = {
 // ======================
 // CONSTANTS (fixed values)
 // ======================
-const PRICES = { milk: 8, beans: 15, matcha: 12 };
-const COFFEE_PER_RECIPE = 5;
-const MATCHA_LATTE_PER_RECIPE = 5;
+const PRICES = { milk: 8, beans: 11, matcha: 14 };
+const COFFEE_PER_RECIPE = 1;
+const MATCHA_LATTE_PER_RECIPE = 1;
 
 // ======================
 // DOM REFERENCES (UI hooks)
@@ -236,7 +236,7 @@ function renderRecipesContent() {
 
     <div class="row recipes ${matchaMeta.rowClass}">
       <div>Matcha Latte <button data-action="quick-info" data-product="matchaLatte">i</button></div>
-      <div>$5/sec</div>
+      <div>$12/sec</div>
       <div class="text-center">${matchaLatteStock}</div>
       <div class="qty">
         <button data-action="recipe-dec" data-product="matchaLatte">-</button>
@@ -255,7 +255,7 @@ function renderRecipesContent() {
 // main render (rebuilds entire UI)
 
 function render() {
-  const profitPerSecond = 1 + state.products.coffee;
+  const profitPerSecond = state.products.coffee + state.products.matchaLatte;
   const costPerBatch = 23;
   const batchProfitPerSecond = 5;
   const breakEvenSeconds = Math.round(costPerBatch / batchProfitPerSecond);
@@ -335,8 +335,8 @@ function handleMainClick(event) {
       state.ui.purchaseQty[item] = nextQty;
       render();
     } else {
-    showpurchaseBlockedPopup();
-  }
+      showpurchaseBlockedPopup();
+    }
 
     return;
   }
@@ -440,6 +440,22 @@ function handleMainClick(event) {
         showpurchaseBlockedPopup("matchaLatte");
       }
     } else {
+      const missingMilk = Math.max(0, qty - state.items.milk);
+      const missingBeans = Math.max(0, qty - state.items.beans);
+      const autoBuyCost =
+        missingMilk * PRICES.milk + missingBeans * PRICES.beans;
+
+      if (autoBuyCost > 0) {
+        if (state.cash >= autoBuyCost) {
+          state.items.milk += missingMilk;
+          state.items.beans += missingBeans;
+          state.cash -= autoBuyCost;
+        } else {
+          showpurchaseBlockedPopup("coffee");
+          return;
+        }
+      }
+
       if (qty > 0 && state.items.milk >= qty && state.items.beans >= qty) {
         state.items.milk -= qty;
         state.items.beans -= qty;
@@ -490,15 +506,18 @@ function startSystemLoop() {
   if (tickIntervalId) return;
 
   tickIntervalId = setInterval(() => {
-    depletionTick++;
-    if (depletionTick >= 2) {
-      if (state.products.coffee > 0) state.products.coffee--;
-      depletionTick = 0;
+    if (state.products.coffee > 0) {
+      state.cash += 5;
+      state.products.coffee--;
     }
 
-    state.cash += 1 + state.products.coffee;
+    if (state.products.matchaLatte > 0) {
+      state.cash += 12;
+      state.products.matchaLatte--;
+    }
+
     render();
-  }, 1000);
+  }, 2000);
 }
 
 // ======================
