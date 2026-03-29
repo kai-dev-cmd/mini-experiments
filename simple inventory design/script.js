@@ -126,6 +126,45 @@ function showpurchaseBlockedPopup(product = "coffee") {
   purchaseBlockedTimeoutId = setTimeout(removepurchaseBlockedPopup, 5000);
 }
 
+// popup for purchases
+
+let purchasedPopupEl = null;
+let purchasedTimeoutId = null;
+
+function removePurchasedPopup() {
+  if (purchasedTimeoutId !== null) {
+    clearTimeout(purchasedTimeoutId);
+    purchasedTimeoutId = null;
+  }
+  if (purchasedPopupEl) {
+    purchasedPopupEl.remove();
+    purchasedPopupEl = null;
+  }
+}
+
+function showPurchasedPopup() {
+  removePurchasedPopup();
+
+  purchasedPopupEl = document.createElement("div");
+  purchasedPopupEl.style =
+    "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#22c55e;color:#fff;padding:10px 12px;border-radius:6px;z-index:9999;";
+
+  purchasedPopupEl.innerHTML = `
+    <div>Purchased!</div>
+    <div class="popup-bar-container"><div class="popup-bar"></div></div>
+  `;
+
+  document.body.appendChild(purchasedPopupEl);
+
+  const bar = purchasedPopupEl.querySelector(".popup-bar");
+  if (bar) {
+    bar.style.transitionDuration = "2s";
+    setTimeout(() => (bar.style.width = "0%"), 0);
+  }
+
+  purchasedTimeoutId = setTimeout(removePurchasedPopup, 2000);
+}
+
 // ======================
 // HELPER LOGIC
 // ======================
@@ -224,7 +263,7 @@ function renderRecipesContent() {
 
     <div class="row recipes ${coffeeMeta.rowClass}">
       <div>Coffee <button data-action="quick-info" data-product="coffee">i</button></div>
-      <div>$5/sec</div>
+      <div>$25/ per 2 sec</div>
       <div class="text-center">
       ${coffeeStock}
       <div class="sell-progress ${coffeeStock > 0 ? "active" : ""}"></div>
@@ -243,7 +282,7 @@ function renderRecipesContent() {
 
     <div class="row recipes ${matchaMeta.rowClass}">
       <div>Matcha Latte <button data-action="quick-info" data-product="matchaLatte">i</button></div>
-      <div>$12/sec</div>
+      <div>$60/per 2 sec</div>
       <div class="text-center">
       ${matchaLatteStock}
       <div class="sell-progress ${matchaLatteStock > 0 ? "active" : ""}"></div>
@@ -265,7 +304,8 @@ function renderRecipesContent() {
 // main render (rebuilds entire UI)
 
 function render() {
-  const profitPerSecond = state.products.coffee + state.products.matchaLatte;
+  const profitPerSecond =
+    state.products.coffee * 25 + state.products.matchaLatte * 60;
   const costPerBatch = 23;
   const batchProfitPerSecond = 5;
   const breakEvenSeconds = Math.round(costPerBatch / batchProfitPerSecond);
@@ -279,7 +319,7 @@ function render() {
   mainBodyEl.innerHTML = `
     <div class="top-bar">
       <div>Cash: $${state.cash}</div>
-      <div>Profit per second: <span class="profit-value">$${profitPerSecond}</span></div>
+      <div>Estimated Income: <span class="profit-value">$${profitPerSecond}</span></div>
       <button data-action="toggle-info">Info</button>
     </div>
 
@@ -293,6 +333,8 @@ function render() {
     </div>
   `;
 
+  // info panel content
+
   infoBodyEl.innerHTML = `
   <div class="summary-line"><strong>📊 Summary</strong></div>
   <div class="summary-line">Total Coffee: ${state.products.coffee}</div>
@@ -300,14 +342,16 @@ function render() {
   <div class="summary-line">Profit/sec: $${profitPerSecond}</div>
 
   <div class="summary-line" style="margin-top:12px;"><strong>☕ Coffee</strong></div>
-  <div class="summary-line">1 Milk + 1 Coffee Bean → +1 Coffee</div>
+  <div class="summary-line">Servings Per stock: +5</div>
+  <div class="summary-line">Ingredients: 1 Milk + 1 Coffee Bean</div>
   <div class="summary-line">Cost: $19</div>
-  <div class="summary-line">Sell: +$5 every 2s</div>
+  <div class="summary-line">Sell: +$25 every 2s</div>
 
   <div class="summary-line" style="margin-top:12px;"><strong>🍵 Matcha Latte</strong></div>
-  <div class="summary-line">1 Milk + 1 Matcha → +1 Matcha Latte</div>
+  <div class="summary-line">Servings Per stock: +5</div>
+  <div class="summary-line">Ingredients: 1 Milk + 1 Matcha</div>
   <div class="summary-line">Cost: $22</div>
-  <div class="summary-line">Sell: +$12 every 2s</div>
+  <div class="summary-line">Sell: +$60 every 2s</div>
 `;
 }
 
@@ -371,6 +415,7 @@ function handleMainClick(event) {
       state.items[item] += qty;
       state.cash -= total;
       state.ui.purchaseQty[item] = 0;
+      showPurchasedPopup();
       render();
     }
     return;
@@ -438,6 +483,7 @@ function handleMainClick(event) {
           state.items.milk += missingMilk;
           state.items.matcha += missingMatcha;
           state.cash -= autoBuyCost;
+          showPurchasedPopup();
         } else {
           showpurchaseBlockedPopup("matchaLatte");
           return;
@@ -468,6 +514,7 @@ function handleMainClick(event) {
           state.items.milk += missingMilk;
           state.items.beans += missingBeans;
           state.cash -= autoBuyCost;
+          showPurchasedPopup();
         } else {
           showpurchaseBlockedPopup("coffee");
           return;
@@ -536,7 +583,7 @@ function startSystemLoop() {
       state.sellTimers.coffee !== null &&
       now >= state.sellTimers.coffee
     ) {
-      state.cash += 5;
+      state.cash += 5 * 5;
       state.products.coffee--;
       didSell = true;
 
@@ -552,7 +599,7 @@ function startSystemLoop() {
       state.sellTimers.matchaLatte !== null &&
       now >= state.sellTimers.matchaLatte
     ) {
-      state.cash += 12;
+      state.cash += 12 * 5;
       state.products.matchaLatte--;
       didSell = true;
 
