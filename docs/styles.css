@@ -73,7 +73,7 @@ body {
 .table-head,
 .row {
   display: grid;
-  gap: 8px;
+  gap: 14px;
   align-items: center;
 }
 
@@ -90,12 +90,32 @@ body {
 .table-head {
   font-weight: 700;
   margin-bottom: 8px;
+  text-align: left;
+}
+
+.table-head div:first-child {
+  text-align: left;
+  padding-left: 4px;
+}
+
+.table-head > div:not(:last-child) {
+  padding-right: 8px;
+  border-right: 1px solid #f9fafb;
 }
 
 .row {
-  padding: 8px;
+  padding: 10px 12px;
   border-radius: 6px;
   margin-bottom: 6px;
+}
+
+.row > div {
+  min-width: 0;
+}
+
+.row > div:not(:last-child) {
+  border-right: 1px solid #f3f4f6;
+  padding-right: 8px;
 }
 
 /* ======================
@@ -184,6 +204,14 @@ button {
 .btn-red {
   background: #ef4444;
   color: white;
+}
+
+button:hover {
+  opacity: 0.55;
+}
+
+button:active {
+  transform: scale(0.96);
 }
 
 /* ======================
