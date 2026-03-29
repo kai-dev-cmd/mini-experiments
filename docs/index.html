@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Your Shop</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+
+  <!-- MAIN APP PANEL -->
+  <body>
+    <div id="mainPanel" class="panel">
+      <div class="panel-header">Your Shop</div>
+      <div id="mainBody" class="panel-body"></div>
+    </div>
+
+<!-- INFO PANEL (TOGGLEABLE) -->
+    <div id="infoPanel" class="panel hidden">
+      <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center">
+        <span>Info</span>
+        <button data-action="close-info">X</button>
+      </div>
+      <div id="infoBody" class="panel-body"></div>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
