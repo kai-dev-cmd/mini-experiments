@@ -2,20 +2,40 @@
 // STATE (manages game data)
 // ======================
 const state = {
+  // starting cash
   cash: 100,
+
+  // expenses tracking (for info panel)
+  expenses: {
+    ingredients: 0,
+    waste: 0,
+  },
+
+  // ingredients
   items: {
     milk: 0,
     beans: 0,
     matcha: 0,
   },
+
+  // products
   products: {
-    coffee: 0,
-    matchaLatte: 0,
+    coffee: {
+      stock: [],
+      isProducing: false,
+      type: "finished",
+    },
+    matchaLatte: {
+      stock: [],
+      isProducing: false,
+      type: "finished",
+    },
   },
-  sellTimers: {
-    coffee: null,
-    matchaLatte: null,
+
+  customer: {
+    list: [],
   },
+
   ui: {
     activeTab: "inventory",
     purchaseQty: { milk: 0, beans: 0, matcha: 0 },
@@ -30,8 +50,31 @@ const state = {
 // CONSTANTS (fixed values)
 // ======================
 const PRICES = { milk: 8, beans: 11, matcha: 14 };
-const COFFEE_PER_RECIPE = 1;
-const MATCHA_LATTE_PER_RECIPE = 1;
+const SERVINGS_PER_BATCH = 5;
+const COFFEE_PRODUCTION_TIME_MS = 8000;
+const MATCHA_LATTE_PRODUCTION_TIME_MS = 15000;
+const SERVE_PRICE = 5;
+const SPOIL_TIME = 20000; // 20 seconds
+const CUSTOMERS = [
+  {
+    name: "Jack",
+    order: "coffee",
+    label: "coffee",
+    dialogue: "A cup of coffee, please!",
+    thankYou: "Thanks, that smells amazing!",
+    angry: "Hey! I've been waiting forever...",
+    price: 5,
+  },
+  {
+    name: "Evie",
+    order: "matchaLatte",
+    label: "matcha latte",
+    dialogue: "Uhh...can I like get a matcha latte?",
+    thankYou: "Yay thanks! This looks so good 💚",
+    angry: "Umm… hello?? I’ve been waiting 😒",
+    price: 5,
+  },
+];
 
 // ======================
 // DOM REFERENCES (UI hooks)
@@ -40,16 +83,17 @@ const mainBodyEl = document.getElementById("mainBody");
 const infoBodyEl = document.getElementById("infoBody");
 const mainPanelEl = document.getElementById("mainPanel");
 const infoPanelEl = document.getElementById("infoPanel");
+const customerBodyEl = document.getElementById("customerBody");
+const customerPanelEl = document.getElementById("customerPanel");
 
 // ======================
 // SYSTEM VARIABLES (runtime)
 // ======================
-let tickIntervalId = null;
-let depletionTick = 0;
 let quickInfoPopupEl = null;
 let quickInfoCloseTimeoutId = null;
 let purchaseBlockedPopupEl = null;
 let purchaseBlockedTimeoutId = null;
+let customerPopupActive = false;
 
 // popup state
 function removeQuickInfoPopup() {
@@ -165,6 +209,37 @@ function showPurchasedPopup() {
   purchasedTimeoutId = setTimeout(removePurchasedPopup, 2000);
 }
 
+// new customer pop up
+function showCustomerPopup() {
+  if (customerPopupActive) return;
+
+  customerPopupActive = true;
+
+  const el = document.createElement("div");
+  el.style =
+    "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#111;color:#fff;padding:16px;border-radius:8px;z-index:9999;";
+  el.innerText = "New Customer Request";
+
+  document.body.appendChild(el);
+
+  setTimeout(() => {
+    el.remove();
+    customerPopupActive = false;
+  }, 2000);
+}
+
+// serve popup
+function showServePopup(amount) {
+  const el = document.createElement("div");
+  el.style =
+    "position:fixed;left:50%;top:40%;transform:translate(-50%,-50%);background:#22c55e;color:#fff;padding:10px 14px;border-radius:6px;z-index:9999;font-weight:bold;";
+  el.innerText = `+ $${amount}`;
+
+  document.body.appendChild(el);
+
+  setTimeout(() => el.remove(), 1000);
+}
+
 // ======================
 // HELPER LOGIC
 // ======================
@@ -180,6 +255,36 @@ function stockMeta(stock) {
   if (stock <= 3)
     return { rowClass: "stock-low", statusClass: "low", status: "Low Stock" };
   return { rowClass: "", statusClass: "", status: "" };
+}
+
+// updates customer progress bars
+function updateCustomerProgressBar() {
+  const customers = state.customer.list;
+  if (!customers.length) return;
+
+  customers.forEach((customer) => {
+    const bar = document.querySelector(
+      `[data-progress-id="${customer.startTime}"]`,
+    );
+    if (!bar) return;
+
+    const elapsed = Date.now() - customer.startTime;
+    const progress = Math.max(0, 1 - elapsed / customer.duration);
+
+    bar.style.width = `${progress * 100}%`;
+    bar.style.background =
+      progress > 0.6 ? "#22c55e" : progress > 0.3 ? "#eab308" : "#ef4444";
+  });
+}
+
+// determines stock state based on age for finished products
+function getStockState(item) {
+  const age = Date.now() - item.createdAt;
+  const ratio = age / SPOIL_TIME;
+
+  if (ratio < 0.5) return "fresh";
+  if (ratio < 0.8) return "warning";
+  return "spoiled";
 }
 
 // ======================
@@ -203,17 +308,24 @@ function renderInventoryContent() {
       return `
         <div class="row inventory ${meta.rowClass}">
           <div>${label}</div>
-          <div class="text-center">${stock}</div>
+
           <div class="qty">
             <button data-action="purchase-dec" data-item="${key}">-</button>
             <span>${qty}</span>
             <button data-action="purchase-inc" data-item="${key}">+</button>
           </div>
+
           <div class="text-center">$${totalPrice}</div>
+
           <div>
             <button data-action="buy" data-item="${key}" ${canBuy ? "" : "disabled"}>Buy</button>
           </div>
-          <div class="status ${meta.statusClass}">${meta.status}</div>
+
+          <div class="stock-cell">
+            <div class="stock-text ${meta.statusClass}">
+              ${stock === 0 ? "Out of Stock" : stock <= 3 ? `${stock} Low` : stock}
+            </div>
+          </div>
         </div>
       `;
     })
@@ -222,11 +334,10 @@ function renderInventoryContent() {
   return `
     <div class="table-head inventory">
       <div>Item</div>
-      <div>Stock</div>
       <div>Qty</div>
       <div>Total Price</div>
       <div></div>
-      <div></div>
+      <div>Stock</div>
     </div>
     ${rows}
   `;
@@ -234,12 +345,16 @@ function renderInventoryContent() {
 
 // recipe table
 function renderRecipesContent() {
-  const coffeeStock = state.products.coffee;
-  const matchaLatteStock = state.products.matchaLatte;
+  const coffeeStock = state.products.coffee.stock;
+  const matchaLatteStock = state.products.matchaLatte.stock;
+  const coffeeIsProducing = state.products.coffee.isProducing;
+  const matchaIsProducing = state.products.matchaLatte.isProducing;
   const coffeeQty = state.recipes.coffee.qty;
   const matchaLatteQty = state.recipes.matchaLatte.qty;
   const coffeeTotalCost = coffeeQty * (PRICES.milk + PRICES.beans);
   const matchaTotalCost = matchaLatteQty * (PRICES.milk + PRICES.matcha);
+  const canAffordCoffee = state.cash >= PRICES.milk + PRICES.beans;
+  const canAffordMatcha = state.cash >= PRICES.milk + PRICES.matcha;
   const canMakeCoffee =
     coffeeQty > 0 &&
     state.items.milk >= coffeeQty &&
@@ -248,68 +363,222 @@ function renderRecipesContent() {
     matchaLatteQty > 0 &&
     state.items.milk >= matchaLatteQty &&
     state.items.matcha >= matchaLatteQty;
-  const coffeeMeta = stockMeta(coffeeStock);
-  const matchaMeta = stockMeta(matchaLatteStock);
+  const canStartCoffee = coffeeQty > 0 && !coffeeIsProducing;
+  const coffeeIsReady = coffeeQty > 0;
+  const canStartMatchaLatte = matchaLatteQty > 0 && !matchaIsProducing;
+  const matchaIsReady = matchaLatteQty > 0;
+  const coffeeMeta = stockMeta(coffeeStock.length);
+  const coffeeHasSpoiled = state.products.coffee.stock.some(
+    (item) => getStockState(item) === "spoiled",
+  );
+  const matchaMeta = stockMeta(matchaLatteStock.length);
+  const matchaHasSpoiled = state.products.matchaLatte.stock.some(
+    (item) => getStockState(item) === "spoiled",
+  );
 
   return `
     <div class="table-head recipes">
       <div>Product</div>
-      <div>Profit</div>
-      <div>Stock</div>
+      <div>Serve</div>
       <div>Qty</div>
       <div></div>
-      <div></div>
+      <div>Stock</div>
     </div>
 
     <div class="row recipes ${coffeeMeta.rowClass}">
       <div>Coffee <button data-action="quick-info" data-product="coffee">i</button></div>
-      <div>$25/ per 2 sec</div>
-      <div class="text-center">
-      ${coffeeStock}
-      <div class="sell-progress ${coffeeStock > 0 ? "active" : ""}"></div>
-</div>
-      <div class="qty">
-        <button data-action="recipe-dec" data-product="coffee">-</button>
-        <span>${coffeeQty}</span>
-        <button data-action="recipe-inc" data-product="coffee">+</button>
-        ${coffeeTotalCost > 0 ? `<span style="opacity:0.8;">-$${coffeeTotalCost}</span>` : ""}
-      </div>
-      <div>
-        <button data-action="make" data-product="coffee" class="${canMakeCoffee ? "btn-green" : "btn-red"}">Make</button>
-      </div>
-      <div class="status ${coffeeMeta.statusClass}">${coffeeMeta.status}</div>
+      <div>$${SERVE_PRICE} / per serving</div>
+
+    <div class="qty">
+      <button data-action="recipe-dec" data-product="coffee">-</button>
+      <span>${coffeeQty}</span>
+      <button data-action="recipe-inc" data-product="coffee">+</button>
+      ${coffeeTotalCost > 0 ? `<span style="opacity:0.8;">-$${coffeeTotalCost}</span>` : ""}
     </div>
+
+    <div style="display:flex; gap:6px;">
+      <button data-action="make" data-product="coffee" 
+      class="${
+        coffeeIsProducing
+          ? "btn-green"
+          : coffeeIsReady
+            ? "btn-green"
+            : canAffordCoffee
+              ? "btn-yellow"
+              : "btn-red"
+      }"
+      >
+        ${
+          coffeeIsProducing
+            ? Math.ceil((state.products.coffee.endTime - Date.now()) / 1000) +
+              "s"
+            : "Make"
+        }
+      </button>
+
+      <button 
+        data-action="waste" 
+        data-product="coffee" 
+        class="btn-red"
+        ${coffeeHasSpoiled ? "" : "disabled"}
+      >
+        Waste
+      </button>
+    </div>
+
+    <div class="stock-cell">
+      <div>
+        ${coffeeStock.length === 0 ? "Out of Stock" : coffeeStock.length}
+      </div>
+        <div class="stock-blocks">
+        ${state.products.coffee.stock
+          .map((item) => {
+            const s = getStockState(item);
+            return `<div class="stock-block ${s}"></div>`;
+          })
+          .join("")}
+    </div>
+  </div>
+</div>
 
     <div class="row recipes ${matchaMeta.rowClass}">
       <div>Matcha Latte <button data-action="quick-info" data-product="matchaLatte">i</button></div>
-      <div>$60/per 2 sec</div>
-      <div class="text-center">
-      ${matchaLatteStock}
-      <div class="sell-progress ${matchaLatteStock > 0 ? "active" : ""}"></div>
-</div>
-      <div class="qty">
-        <button data-action="recipe-dec" data-product="matchaLatte">-</button>
-        <span>${matchaLatteQty}</span>
-        <button data-action="recipe-inc" data-product="matchaLatte">+</button>
-        ${matchaTotalCost > 0 ? `<span style="opacity:0.8;">-$${matchaTotalCost}</span>` : ""}
-      </div>
-      <div>
-        <button data-action="make" data-product="matchaLatte" class="${canMakeMatchaLatte ? "btn-green" : "btn-red"}">Make</button>
-      </div>
-      <div class="status ${matchaMeta.statusClass}">${matchaMeta.status}</div>
+        <div>$${SERVE_PRICE} / per serving</div>
+
+    <div class="qty">
+      <button data-action="recipe-dec" data-product="matchaLatte">-</button>
+      <span>${matchaLatteQty}</span>
+      <button data-action="recipe-inc" data-product="matchaLatte">+</button>
+      ${matchaTotalCost > 0 ? `<span style="opacity:0.8;">-$${matchaTotalCost}</span>` : ""}
     </div>
+
+    <div style="display:flex; gap:6px;">
+      <button data-action="make" data-product="matchaLatte" 
+      class="${
+        matchaIsProducing
+          ? "btn-green"
+          : matchaIsReady
+            ? "btn-green"
+            : canAffordMatcha
+              ? "btn-yellow"
+              : "btn-red"
+      }"
+      >
+        ${
+          matchaIsProducing
+            ? Math.ceil((state.products.matchaLatte.endTime - Date.now()) / 1000) +
+              "s"
+            : "Make"
+        }
+      </button>
+
+      <button 
+        data-action="waste" 
+        data-product="matchaLatte" 
+        class="btn-red"
+        ${matchaHasSpoiled ? "" : "disabled"}
+      >
+        Waste
+      </button>
+    </div>
+
+    <div class="stock-cell">
+      <div>
+        ${matchaLatteStock.length === 0 ? "Out of Stock" : matchaLatteStock.length}
+      </div>
+      <div class="stock-blocks">
+        ${state.products.matchaLatte.stock
+          .map((item) => {
+            const s = getStockState(item);
+            return `<div class="stock-block ${s}"></div>`;
+          })
+          .join("")}
+    </div>
+  </div>
+</div>
   `;
 }
 
 // main render (rebuilds entire UI)
 
+function renderCustomerPanel() {
+  const customers = state.customer.list;
+
+  if (!customers.length) {
+    return `
+      <div class="customer-panel" style="padding:10px;border:1px solid #ddd;border-radius:6px;opacity:0.7;">
+        <div>No customers at the moment...</div>
+        <div style="font-size:12px;opacity:0.6;">Waiting for next order</div>
+      </div>
+    `;
+  }
+
+  return customers
+    .map((customer) => {
+      const product = state.products[customer.order];
+      const hasStock = product && product.stock.length > 0;
+
+      const elapsed = Date.now() - customer.startTime;
+      const progress = Math.max(0, 1 - elapsed / customer.duration);
+
+      return `
+      <div class="customer-panel" style="margin-bottom:12px;padding:10px;border:1px solid #ddd;border-radius:6px;">
+        ${customer.name}: ${
+          customer.phase === "served"
+            ? customer.thankYou
+            : customer.phase === "expired"
+              ? customer.angry
+              : customer.dialogue
+        }
+
+        ${
+          customer.phase === "ordering"
+            ? `
+        <div style="margin-top:8px;">
+          <button 
+            data-action="serve-customer"
+            data-product="${customer.order}"
+            data-id="${customer.startTime}"
+            style="background:${hasStock ? "#22c55e" : "#ef4444"}"
+            ${hasStock ? "" : "disabled"}
+          >
+            Serve
+          </button>
+        </div>`
+            : ""
+        }
+
+         ${
+           customer.phase === "ordering"
+             ? `
+        <div style="margin-top:8px;">
+          <div style="height:6px;background:#eee;border-radius:4px;">
+            <div data-progress-id="${customer.startTime}" style="
+              height:100%;
+              width:${progress * 100}%;
+              background:${
+                progress > 0.6
+                  ? "#22c55e" // green
+                  : progress > 0.3
+                    ? "#eab308" // yellow
+                    : "#ef4444" // red
+              };
+            "></div>
+          </div>
+        </div>`
+             : ""
+         }
+
+      </div>
+    `;
+    })
+    .join("");
+}
+
 function render() {
-  const profitPerSecond =
-    state.products.coffee * 25 + state.products.matchaLatte * 60;
-  const costPerBatch = 23;
-  const batchProfitPerSecond = 5;
-  const breakEvenSeconds = Math.round(costPerBatch / batchProfitPerSecond);
-  const matchaLatteCostPerBatch = PRICES.milk + PRICES.matcha;
+  const totalFinishedStock =
+    state.products.coffee.stock.length +
+    state.products.matchaLatte.stock.length;
 
   const inventoryTabClass =
     state.ui.activeTab === "inventory" ? "tab active" : "tab";
@@ -319,7 +588,9 @@ function render() {
   mainBodyEl.innerHTML = `
     <div class="top-bar">
       <div>Cash: $${state.cash}</div>
-      <div>Estimated Income: <span class="profit-value">$${profitPerSecond}</span></div>
+      <div>Ready Servings: <span class="profit-value">${totalFinishedStock}</span></div>
+      <div>Expenses: $${state.expenses.ingredients + state.expenses.waste}</div>
+      <div style="opacity:0.7;">Waste: $${state.expenses.waste}</div>
       <button data-action="toggle-info">Info</button>
     </div>
 
@@ -328,31 +599,130 @@ function render() {
       <button class="${recipesTabClass}" data-action="tab" data-tab="recipes">Recipes</button>
     </div>
 
-    <div>
+    <div> 
       ${state.ui.activeTab === "inventory" ? renderInventoryContent() : renderRecipesContent()}
     </div>
   `;
+
+  // customer panel content
+
+  customerBodyEl.innerHTML = renderCustomerPanel();
 
   // info panel content
 
   infoBodyEl.innerHTML = `
   <div class="summary-line"><strong>📊 Summary</strong></div>
-  <div class="summary-line">Total Coffee: ${state.products.coffee}</div>
-  <div class="summary-line">Total Matcha Latte: ${state.products.matchaLatte}</div>
-  <div class="summary-line">Profit/sec: $${profitPerSecond}</div>
+  <div class="summary-line">Coffee Stock: ${state.products.coffee.stock.length}</div>
+  <div class="summary-line">Matcha Latte Stock: ${state.products.matchaLatte.stock.length}</div>
+  <div class="summary-line">Serve Value: $${SERVE_PRICE} each</div>
 
   <div class="summary-line" style="margin-top:12px;"><strong>☕ Coffee</strong></div>
   <div class="summary-line">Servings Per stock: +5</div>
   <div class="summary-line">Ingredients: 1 Milk + 1 Coffee Bean</div>
   <div class="summary-line">Cost: $19</div>
-  <div class="summary-line">Sell: +$25 every 2s</div>
+  <div class="summary-line">Production Time: 8s</div>
 
   <div class="summary-line" style="margin-top:12px;"><strong>🍵 Matcha Latte</strong></div>
   <div class="summary-line">Servings Per stock: +5</div>
   <div class="summary-line">Ingredients: 1 Milk + 1 Matcha</div>
   <div class="summary-line">Cost: $22</div>
-  <div class="summary-line">Sell: +$60 every 2s</div>
+  <div class="summary-line">Production Time: 15s</div>
 `;
+}
+
+// serve product to customer
+function serveProduct(productType, id) {
+  const customer = state.customer.list.find((c) => c.startTime == id);
+  if (!customer) return;
+
+  const product = state.products[productType];
+  if (!product || product.stock.length <= 0) return;
+  if (customer.order !== productType) return;
+
+  const tip = calculateTip(customer);
+
+  product.stock.shift();
+  state.cash += customer.price + tip;
+
+  showServePopup(customer.price + tip);
+
+  customer.phase = "served";
+
+  setTimeout(() => {
+    const index = state.customer.list.indexOf(customer);
+    if (index !== -1) {
+      state.customer.list.splice(index, 1);
+      render();
+    }
+  }, 1500);
+
+  render();
+}
+
+// spawn customer
+function spawnCustomer() {
+  if (state.customer.list.length >= 5) return;
+
+  const base = getRandomCustomer();
+
+  const newCustomer = {
+    ...base,
+    duration: 20000,
+    startTime: Date.now(),
+    phase: "ordering",
+    maxTip: 5,
+  };
+
+  state.customer.list.push(newCustomer);
+
+  // expiration logic
+  setTimeout(() => {
+    if (!state.customer.list.includes(newCustomer)) return;
+
+    newCustomer.phase = "expired";
+    render();
+
+    setTimeout(() => {
+      const index = state.customer.list.indexOf(newCustomer);
+      if (index !== -1) {
+        state.customer.list.splice(index, 1);
+        render();
+      }
+    }, 1500);
+  }, newCustomer.duration);
+
+  // IMPORTANT: popup trigger
+  if (state.customer.list.length === 1) {
+    showCustomerPopup();
+  }
+
+  render();
+}
+
+function calculateTip(customer) {
+  const elapsed = Date.now() - customer.startTime;
+  const ratio = 1 - elapsed / customer.duration;
+
+  const tip = Math.max(0, Math.floor(customer.maxTip * ratio));
+  return tip;
+}
+
+// random customer generator
+function getRandomCustomer() {
+  const randomIndex = Math.floor(Math.random() * CUSTOMERS.length);
+  return CUSTOMERS[randomIndex];
+}
+
+function acceptCustomer() {
+  const customer = state.customer.active;
+  if (!customer) return;
+
+  customer.timer = setTimeout(() => {
+    state.customer.active = null;
+    render();
+  }, customer.duration);
+
+  render();
 }
 
 // ======================
@@ -373,6 +743,46 @@ function handleMainClick(event) {
   if (action === "quick-info") {
     if (!product) return;
     showQuickInfoPopup(product);
+    return;
+  }
+
+  if (action === "serve") {
+    if (!product) return;
+    serveProduct(product);
+    return;
+  }
+
+  if (action === "accept-customer") {
+    acceptCustomer();
+    return;
+  }
+
+  if (action === "serve-customer") {
+    const product = target.dataset.product;
+    const id = target.dataset.id;
+    serveProduct(product, id);
+    return;
+  }
+
+  // waste spoiled products
+  if (action === "waste") {
+    const productState = state.products[product];
+
+    if (!productState || productState.stock.length === 0) return;
+
+    const spoiled = productState.stock.filter(
+      (item) => getStockState(item) === "spoiled",
+    );
+
+    const wasteCost = spoiled.length * 2;
+
+    productState.stock = productState.stock.filter(
+      (item) => getStockState(item) !== "spoiled",
+    );
+
+    state.cash -= wasteCost;
+
+    render();
     return;
   }
 
@@ -470,7 +880,11 @@ function handleMainClick(event) {
   if (action === "make") {
     if (!product || !state.recipes[product]) return;
 
+    const productState = state.products[product];
+    if (!productState || productState.isProducing) return;
+
     const qty = state.recipes[product].qty;
+    if (qty <= 0) return;
 
     if (product === "matchaLatte") {
       const missingMilk = Math.max(0, qty - state.items.milk);
@@ -490,16 +904,29 @@ function handleMainClick(event) {
         }
       }
 
+      if (!(state.items.milk >= qty && state.items.matcha >= qty)) {
+        showpurchaseBlockedPopup("matchaLatte");
+        return;
+      }
+
       if (qty > 0 && state.items.milk >= qty && state.items.matcha >= qty) {
         state.items.milk -= qty;
         state.items.matcha -= qty;
-        state.products.matchaLatte += qty * MATCHA_LATTE_PER_RECIPE;
-        console.log("MAKE CLICK MATCHA", Date.now());
         state.recipes[product].qty = 0;
-        if (state.sellTimers[product] === null) {
-          state.sellTimers[product] = Date.now() + 2000;
-        }
+        productState.isProducing = true;
+        productState.endTime = Date.now() + MATCHA_LATTE_PRODUCTION_TIME_MS;
         render();
+
+        setTimeout(() => {
+          for (let i = 0; i < qty * SERVINGS_PER_BATCH; i++) {
+            productState.stock.push({
+              createdAt: Date.now(),
+            });
+          }
+
+          productState.isProducing = false;
+          render();
+        }, MATCHA_LATTE_PRODUCTION_TIME_MS);
       } else {
         showpurchaseBlockedPopup("matchaLatte");
       }
@@ -521,16 +948,29 @@ function handleMainClick(event) {
         }
       }
 
+      if (!(state.items.milk >= qty && state.items.beans >= qty)) {
+        showpurchaseBlockedPopup("coffee");
+        return;
+      }
+
       if (qty > 0 && state.items.milk >= qty && state.items.beans >= qty) {
         state.items.milk -= qty;
         state.items.beans -= qty;
-        state.products.coffee += qty * COFFEE_PER_RECIPE;
-        console.log("MAKE CLICK COFFEE", Date.now());
         state.recipes[product].qty = 0;
-        if (state.sellTimers[product] === null) {
-          state.sellTimers[product] = Date.now() + 2000;
-        }
+        productState.isProducing = true;
+        productState.endTime = Date.now() + COFFEE_PRODUCTION_TIME_MS;
         render();
+
+        setTimeout(() => {
+          for (let i = 0; i < qty * SERVINGS_PER_BATCH; i++) {
+            productState.stock.push({
+              createdAt: Date.now(),
+            });
+          }
+
+          productState.isProducing = false;
+          render();
+        }, COFFEE_PRODUCTION_TIME_MS);
       } else {
         showpurchaseBlockedPopup("coffee");
       }
@@ -569,63 +1009,43 @@ function makePanelDraggable(panelEl) {
 }
 
 // ======================
-// GAME LOOP (auto updates)
-// ======================
-function startSystemLoop() {
-  if (tickIntervalId) return;
-
-  tickIntervalId = setInterval(() => {
-    let didSell = false;
-    const now = Date.now();
-
-    if (
-      state.products.coffee > 0 &&
-      state.sellTimers.coffee !== null &&
-      now >= state.sellTimers.coffee
-    ) {
-      state.cash += 5 * 5;
-      state.products.coffee--;
-      didSell = true;
-
-      if (state.products.coffee > 0) {
-        state.sellTimers.coffee = Date.now() + 2000;
-      } else {
-        state.sellTimers.coffee = null;
-      }
-    }
-
-    if (
-      state.products.matchaLatte > 0 &&
-      state.sellTimers.matchaLatte !== null &&
-      now >= state.sellTimers.matchaLatte
-    ) {
-      state.cash += 12 * 5;
-      state.products.matchaLatte--;
-      didSell = true;
-
-      if (state.products.matchaLatte > 0) {
-        state.sellTimers.matchaLatte = Date.now() + 2000;
-      } else {
-        state.sellTimers.matchaLatte = null;
-      }
-    }
-
-    if (didSell) {
-      render();
-    }
-  }, 250);
-}
-
-// ======================
 // INIT (entry point)
 // ======================
 function init() {
   mainBodyEl.addEventListener("click", handleMainClick);
+  customerBodyEl.addEventListener("click", handleMainClick);
   infoPanelEl.addEventListener("click", handleInfoClick);
+
   makePanelDraggable(mainPanelEl);
   makePanelDraggable(infoPanelEl);
-  startSystemLoop();
+  makePanelDraggable(customerPanelEl);
+
   render();
+
+  // customer loop defined INSIDE
+  function startCustomerLoop() {
+    setTimeout(() => {
+      if (state.customer.list.length < 5) {
+        spawnCustomer();
+      }
+      startCustomerLoop();
+    }, 5000);
+  }
+
+  // start it INSIDE
+  startCustomerLoop();
+
+  // lightweight UI updates
+  setInterval(updateCustomerProgressBar, 100);
+
+  setInterval(() => {
+    if (
+      state.products.coffee.isProducing ||
+      state.products.matchaLatte.isProducing
+    ) {
+      render();
+    }
+  }, 500);
 }
 
 init();
