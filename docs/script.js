@@ -2,20 +2,31 @@
 // STATE (manages game data)
 // ======================
 const state = {
+  // starting cash
   cash: 100,
+
+  // expenses tracking (for info panel)
+  expenses: {
+    ingredients: 0,
+    waste: 0,
+  },
+
+  // ingredients
   items: {
     milk: 0,
     beans: 0,
     matcha: 0,
   },
+
+  // products
   products: {
     coffee: {
-      stock: 0,
+      stock: [],
       isProducing: false,
       type: "finished",
     },
     matchaLatte: {
-      stock: 0,
+      stock: [],
       isProducing: false,
       type: "finished",
     },
@@ -43,6 +54,7 @@ const SERVINGS_PER_BATCH = 5;
 const COFFEE_PRODUCTION_TIME_MS = 8000;
 const MATCHA_LATTE_PRODUCTION_TIME_MS = 15000;
 const SERVE_PRICE = 5;
+const SPOIL_TIME = 20000; // 20 seconds
 const CUSTOMERS = [
   {
     name: "Jack",
@@ -245,6 +257,7 @@ function stockMeta(stock) {
   return { rowClass: "", statusClass: "", status: "" };
 }
 
+// updates customer progress bars
 function updateCustomerProgressBar() {
   const customers = state.customer.list;
   if (!customers.length) return;
@@ -259,7 +272,19 @@ function updateCustomerProgressBar() {
     const progress = Math.max(0, 1 - elapsed / customer.duration);
 
     bar.style.width = `${progress * 100}%`;
+    bar.style.background =
+      progress > 0.6 ? "#22c55e" : progress > 0.3 ? "#eab308" : "#ef4444";
   });
+}
+
+// determines stock state based on age for finished products
+function getStockState(item) {
+  const age = Date.now() - item.createdAt;
+  const ratio = age / SPOIL_TIME;
+
+  if (ratio < 0.5) return "fresh";
+  if (ratio < 0.8) return "warning";
+  return "spoiled";
 }
 
 // ======================
@@ -283,17 +308,24 @@ function renderInventoryContent() {
       return `
         <div class="row inventory ${meta.rowClass}">
           <div>${label}</div>
-          <div class="text-center">${stock}</div>
+
           <div class="qty">
             <button data-action="purchase-dec" data-item="${key}">-</button>
             <span>${qty}</span>
             <button data-action="purchase-inc" data-item="${key}">+</button>
           </div>
+
           <div class="text-center">$${totalPrice}</div>
+
           <div>
             <button data-action="buy" data-item="${key}" ${canBuy ? "" : "disabled"}>Buy</button>
           </div>
-          <div class="status ${meta.statusClass}">${meta.status}</div>
+
+          <div class="stock-cell">
+            <div class="stock-text ${meta.statusClass}">
+              ${stock === 0 ? "Out of Stock" : stock <= 3 ? `${stock} Low` : stock}
+            </div>
+          </div>
         </div>
       `;
     })
@@ -302,11 +334,10 @@ function renderInventoryContent() {
   return `
     <div class="table-head inventory">
       <div>Item</div>
-      <div>Stock</div>
       <div>Qty</div>
       <div>Total Price</div>
       <div></div>
-      <div></div>
+      <div>Stock</div>
     </div>
     ${rows}
   `;
@@ -322,6 +353,8 @@ function renderRecipesContent() {
   const matchaLatteQty = state.recipes.matchaLatte.qty;
   const coffeeTotalCost = coffeeQty * (PRICES.milk + PRICES.beans);
   const matchaTotalCost = matchaLatteQty * (PRICES.milk + PRICES.matcha);
+  const canAffordCoffee = state.cash >= PRICES.milk + PRICES.beans;
+  const canAffordMatcha = state.cash >= PRICES.milk + PRICES.matcha;
   const canMakeCoffee =
     coffeeQty > 0 &&
     state.items.milk >= coffeeQty &&
@@ -330,83 +363,139 @@ function renderRecipesContent() {
     matchaLatteQty > 0 &&
     state.items.milk >= matchaLatteQty &&
     state.items.matcha >= matchaLatteQty;
-  const canStartCoffee = canMakeCoffee && !coffeeIsProducing;
-  const canStartMatchaLatte = canMakeMatchaLatte && !matchaIsProducing;
-  const coffeeMeta = stockMeta(coffeeStock);
-  const matchaMeta = stockMeta(matchaLatteStock);
+  const canStartCoffee = coffeeQty > 0 && !coffeeIsProducing;
+  const coffeeIsReady = coffeeQty > 0;
+  const canStartMatchaLatte = matchaLatteQty > 0 && !matchaIsProducing;
+  const matchaIsReady = matchaLatteQty > 0;
+  const coffeeMeta = stockMeta(coffeeStock.length);
+  const coffeeHasSpoiled = state.products.coffee.stock.some(
+    (item) => getStockState(item) === "spoiled",
+  );
+  const matchaMeta = stockMeta(matchaLatteStock.length);
+  const matchaHasSpoiled = state.products.matchaLatte.stock.some(
+    (item) => getStockState(item) === "spoiled",
+  );
 
   return `
     <div class="table-head recipes">
       <div>Product</div>
       <div>Serve</div>
-      <div>Stock</div>
       <div>Qty</div>
       <div></div>
-      <div></div>
+      <div>Stock</div>
     </div>
 
     <div class="row recipes ${coffeeMeta.rowClass}">
       <div>Coffee <button data-action="quick-info" data-product="coffee">i</button></div>
       <div>$${SERVE_PRICE} / per serving</div>
-      <div class="text-center">
-      ${coffeeStock}
-      <div style="height:6px;background:#eee;border-radius:4px;margin-top:4px;">
-        <div style="
-          height:100%;
-          width:${(coffeeStock / 5) * 100}%;
-          background:#22c55e;
-        "></div>
-      </div>
-    </div> 
 
     <div class="qty">
-        <button data-action="recipe-dec" data-product="coffee">-</button>
-        <span>${coffeeQty}</span>
-        <button data-action="recipe-inc" data-product="coffee">+</button>
-        ${coffeeTotalCost > 0 ? `<span style="opacity:0.8;">-$${coffeeTotalCost}</span>` : ""}
-      </div>
-      <div>
-        <button data-action="make" data-product="coffee" class="${canStartCoffee ? "btn-green" : "btn-red"}">${
+      <button data-action="recipe-dec" data-product="coffee">-</button>
+      <span>${coffeeQty}</span>
+      <button data-action="recipe-inc" data-product="coffee">+</button>
+      ${coffeeTotalCost > 0 ? `<span style="opacity:0.8;">-$${coffeeTotalCost}</span>` : ""}
+    </div>
+
+    <div style="display:flex; gap:6px;">
+      <button data-action="make" data-product="coffee" 
+      class="${
+        coffeeIsProducing
+          ? "btn-green"
+          : coffeeIsReady
+            ? "btn-green"
+            : canAffordCoffee
+              ? "btn-yellow"
+              : "btn-red"
+      }"
+      >
+        ${
           coffeeIsProducing
             ? Math.ceil((state.products.coffee.endTime - Date.now()) / 1000) +
               "s"
             : "Make"
-        }</button>
-      </div>
-      <div class="status ${coffeeMeta.statusClass}">${coffeeIsProducing ? "Producing..." : coffeeMeta.status}</div>
+        }
+      </button>
+
+      <button 
+        data-action="waste" 
+        data-product="coffee" 
+        class="btn-red"
+        ${coffeeHasSpoiled ? "" : "disabled"}
+      >
+        Waste
+      </button>
     </div>
+
+    <div class="stock-cell">
+      <div>
+        ${coffeeStock.length === 0 ? "Out of Stock" : coffeeStock.length}
+      </div>
+        <div class="stock-blocks">
+        ${state.products.coffee.stock
+          .map((item) => {
+            const s = getStockState(item);
+            return `<div class="stock-block ${s}"></div>`;
+          })
+          .join("")}
+    </div>
+  </div>
+</div>
 
     <div class="row recipes ${matchaMeta.rowClass}">
       <div>Matcha Latte <button data-action="quick-info" data-product="matchaLatte">i</button></div>
-      <div>$${SERVE_PRICE} / per serving</div>
-      <div class="text-center">
-      ${matchaLatteStock}
-      <div style="height:6px;background:#eee;border-radius:4px;margin-top:4px;">
-        <div style="
-          height:100%;
-          width:${(matchaLatteStock / 5) * 100}%;
-          background:#22c55e;
-        "></div>
-      </div>
-    </div> 
+        <div>$${SERVE_PRICE} / per serving</div>
 
     <div class="qty">
-        <button data-action="recipe-dec" data-product="matchaLatte">-</button>
-        <span>${matchaLatteQty}</span>
-        <button data-action="recipe-inc" data-product="matchaLatte">+</button>
-        ${matchaTotalCost > 0 ? `<span style="opacity:0.8;">-$${matchaTotalCost}</span>` : ""}
-      </div>
-      <div>
-        <button data-action="make" data-product="matchaLatte" class="${canStartMatchaLatte ? "btn-green" : "btn-red"}">${
-          matchaIsProducing
-            ? Math.ceil(
-                (state.products.matchaLatte.endTime - Date.now()) / 1000,
-              ) + "s"
-            : "Make"
-        }</button>
-      </div>
-      <div class="status ${matchaMeta.statusClass}">${matchaIsProducing ? "Producing..." : matchaMeta.status}</div>
+      <button data-action="recipe-dec" data-product="matchaLatte">-</button>
+      <span>${matchaLatteQty}</span>
+      <button data-action="recipe-inc" data-product="matchaLatte">+</button>
+      ${matchaTotalCost > 0 ? `<span style="opacity:0.8;">-$${matchaTotalCost}</span>` : ""}
     </div>
+
+    <div style="display:flex; gap:6px;">
+      <button data-action="make" data-product="matchaLatte" 
+      class="${
+        matchaIsProducing
+          ? "btn-green"
+          : matchaIsReady
+            ? "btn-green"
+            : canAffordMatcha
+              ? "btn-yellow"
+              : "btn-red"
+      }"
+      >
+        ${
+          matchaIsProducing
+            ? Math.ceil((state.products.matchaLatte.endTime - Date.now()) / 1000) +
+              "s"
+            : "Make"
+        }
+      </button>
+
+      <button 
+        data-action="waste" 
+        data-product="matchaLatte" 
+        class="btn-red"
+        ${matchaHasSpoiled ? "" : "disabled"}
+      >
+        Waste
+      </button>
+    </div>
+
+    <div class="stock-cell">
+      <div>
+        ${matchaLatteStock.length === 0 ? "Out of Stock" : matchaLatteStock.length}
+      </div>
+      <div class="stock-blocks">
+        ${state.products.matchaLatte.stock
+          .map((item) => {
+            const s = getStockState(item);
+            return `<div class="stock-block ${s}"></div>`;
+          })
+          .join("")}
+    </div>
+  </div>
+</div>
   `;
 }
 
@@ -427,7 +516,7 @@ function renderCustomerPanel() {
   return customers
     .map((customer) => {
       const product = state.products[customer.order];
-      const hasStock = product && product.stock > 0;
+      const hasStock = product && product.stock.length > 0;
 
       const elapsed = Date.now() - customer.startTime;
       const progress = Math.max(0, 1 - elapsed / customer.duration);
@@ -438,8 +527,8 @@ function renderCustomerPanel() {
           customer.phase === "served"
             ? customer.thankYou
             : customer.phase === "expired"
-            ? customer.angry
-            : customer.dialogue
+              ? customer.angry
+              : customer.dialogue
         }
 
         ${
@@ -459,15 +548,27 @@ function renderCustomerPanel() {
             : ""
         }
 
+         ${
+           customer.phase === "ordering"
+             ? `
         <div style="margin-top:8px;">
           <div style="height:6px;background:#eee;border-radius:4px;">
             <div data-progress-id="${customer.startTime}" style="
               height:100%;
               width:${progress * 100}%;
-              background:#ef4444;
+              background:${
+                progress > 0.6
+                  ? "#22c55e" // green
+                  : progress > 0.3
+                    ? "#eab308" // yellow
+                    : "#ef4444" // red
+              };
             "></div>
           </div>
-        </div>
+        </div>`
+             : ""
+         }
+
       </div>
     `;
     })
@@ -476,7 +577,8 @@ function renderCustomerPanel() {
 
 function render() {
   const totalFinishedStock =
-    state.products.coffee.stock + state.products.matchaLatte.stock;
+    state.products.coffee.stock.length +
+    state.products.matchaLatte.stock.length;
 
   const inventoryTabClass =
     state.ui.activeTab === "inventory" ? "tab active" : "tab";
@@ -487,6 +589,8 @@ function render() {
     <div class="top-bar">
       <div>Cash: $${state.cash}</div>
       <div>Ready Servings: <span class="profit-value">${totalFinishedStock}</span></div>
+      <div>Expenses: $${state.expenses.ingredients + state.expenses.waste}</div>
+      <div style="opacity:0.7;">Waste: $${state.expenses.waste}</div>
       <button data-action="toggle-info">Info</button>
     </div>
 
@@ -495,7 +599,7 @@ function render() {
       <button class="${recipesTabClass}" data-action="tab" data-tab="recipes">Recipes</button>
     </div>
 
-    <div>
+    <div> 
       ${state.ui.activeTab === "inventory" ? renderInventoryContent() : renderRecipesContent()}
     </div>
   `;
@@ -508,8 +612,8 @@ function render() {
 
   infoBodyEl.innerHTML = `
   <div class="summary-line"><strong>📊 Summary</strong></div>
-  <div class="summary-line">Coffee Stock: ${state.products.coffee.stock}</div>
-  <div class="summary-line">Matcha Latte Stock: ${state.products.matchaLatte.stock}</div>
+  <div class="summary-line">Coffee Stock: ${state.products.coffee.stock.length}</div>
+  <div class="summary-line">Matcha Latte Stock: ${state.products.matchaLatte.stock.length}</div>
   <div class="summary-line">Serve Value: $${SERVE_PRICE} each</div>
 
   <div class="summary-line" style="margin-top:12px;"><strong>☕ Coffee</strong></div>
@@ -532,12 +636,12 @@ function serveProduct(productType, id) {
   if (!customer) return;
 
   const product = state.products[productType];
-  if (!product || product.stock <= 0) return;
+  if (!product || product.stock.length <= 0) return;
   if (customer.order !== productType) return;
 
   const tip = calculateTip(customer);
 
-  product.stock -= 1;
+  product.stock.shift();
   state.cash += customer.price + tip;
 
   showServePopup(customer.price + tip);
@@ -660,6 +764,28 @@ function handleMainClick(event) {
     return;
   }
 
+  // waste spoiled products
+  if (action === "waste") {
+    const productState = state.products[product];
+
+    if (!productState || productState.stock.length === 0) return;
+
+    const spoiled = productState.stock.filter(
+      (item) => getStockState(item) === "spoiled",
+    );
+
+    const wasteCost = spoiled.length * 2;
+
+    productState.stock = productState.stock.filter(
+      (item) => getStockState(item) !== "spoiled",
+    );
+
+    state.cash -= wasteCost;
+
+    render();
+    return;
+  }
+
   // switch tabs
   if (action === "tab") {
     state.ui.activeTab = target.dataset.tab;
@@ -778,6 +904,11 @@ function handleMainClick(event) {
         }
       }
 
+      if (!(state.items.milk >= qty && state.items.matcha >= qty)) {
+        showpurchaseBlockedPopup("matchaLatte");
+        return;
+      }
+
       if (qty > 0 && state.items.milk >= qty && state.items.matcha >= qty) {
         state.items.milk -= qty;
         state.items.matcha -= qty;
@@ -787,7 +918,12 @@ function handleMainClick(event) {
         render();
 
         setTimeout(() => {
-          productState.stock += qty * SERVINGS_PER_BATCH;
+          for (let i = 0; i < qty * SERVINGS_PER_BATCH; i++) {
+            productState.stock.push({
+              createdAt: Date.now(),
+            });
+          }
+
           productState.isProducing = false;
           render();
         }, MATCHA_LATTE_PRODUCTION_TIME_MS);
@@ -812,6 +948,11 @@ function handleMainClick(event) {
         }
       }
 
+      if (!(state.items.milk >= qty && state.items.beans >= qty)) {
+        showpurchaseBlockedPopup("coffee");
+        return;
+      }
+
       if (qty > 0 && state.items.milk >= qty && state.items.beans >= qty) {
         state.items.milk -= qty;
         state.items.beans -= qty;
@@ -821,7 +962,12 @@ function handleMainClick(event) {
         render();
 
         setTimeout(() => {
-          productState.stock += qty * SERVINGS_PER_BATCH;
+          for (let i = 0; i < qty * SERVINGS_PER_BATCH; i++) {
+            productState.stock.push({
+              createdAt: Date.now(),
+            });
+          }
+
           productState.isProducing = false;
           render();
         }, COFFEE_PRODUCTION_TIME_MS);
