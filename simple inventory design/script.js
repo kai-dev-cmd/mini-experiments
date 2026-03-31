@@ -22,13 +22,11 @@ const state = {
   products: {
     coffee: {
       stock: [],
-      isProducing: false,
-      type: "finished",
+      productionQueue: [],
     },
     matchaLatte: {
       stock: [],
-      isProducing: false,
-      type: "finished",
+      productionQueue: [],
     },
   },
 
@@ -38,6 +36,7 @@ const state = {
 
   ui: {
     activeTab: "inventory",
+    activeInfoView: "cash",
     purchaseQty: { milk: 0, beans: 0, matcha: 0 },
   },
   recipes: {
@@ -50,9 +49,11 @@ const state = {
 // CONSTANTS (fixed values)
 // ======================
 const PRICES = { milk: 8, beans: 11, matcha: 14 };
-const SERVINGS_PER_BATCH = 5;
+const SERVINGS_PER_BATCH = 3;
 const COFFEE_PRODUCTION_TIME_MS = 8000;
 const MATCHA_LATTE_PRODUCTION_TIME_MS = 15000;
+const MAX_PRODUCTION_QUEUE = 2;
+const MAX_STOCK = 12;
 const SERVE_PRICE = 5;
 const SPOIL_TIME = 20000; // 20 seconds
 const CUSTOMERS = [
@@ -240,9 +241,41 @@ function showServePopup(amount) {
   setTimeout(() => el.remove(), 1000);
 }
 
+// production block popup
+function showProductionLimitPopup() {
+  removepurchaseBlockedPopup();
+
+  purchaseBlockedPopupEl = document.createElement("div");
+  purchaseBlockedPopupEl.style =
+    "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#f59e0b;color:#111;padding:10px 12px;border-radius:6px;z-index:9999;";
+
+  purchaseBlockedPopupEl.innerHTML = `
+    <div>You can only make 2 batches in production</div>
+    <div class="popup-bar-container"><div class="popup-bar"></div></div>
+  `;
+
+  document.body.appendChild(purchaseBlockedPopupEl);
+
+  const bar = purchaseBlockedPopupEl.querySelector(".popup-bar");
+  if (bar) {
+    bar.style.transitionDuration = "3s";
+    setTimeout(() => (bar.style.width = "0%"), 0);
+  }
+
+  purchaseBlockedTimeoutId = setTimeout(removepurchaseBlockedPopup, 3000);
+}
+
 // ======================
 // HELPER LOGIC
 // ======================
+
+// determines make button state based on ingredients and cash
+function getMakeButtonState(product) {
+  const qty = state.recipes[product].qty;
+
+  if (qty <= 0) return "disabled"; // no qty → no action
+  return "green"; // any qty → ready to make
+}
 
 // returns UI status based on stock level
 function stockMeta(stock) {
@@ -250,7 +283,7 @@ function stockMeta(stock) {
     return {
       rowClass: "stock-zero",
       statusClass: "zero",
-      status: "Out of Stock",
+      status: "86",
     };
   if (stock <= 3)
     return { rowClass: "stock-low", statusClass: "low", status: "Low Stock" };
@@ -285,6 +318,36 @@ function getStockState(item) {
   if (ratio < 0.5) return "fresh";
   if (ratio < 0.8) return "warning";
   return "spoiled";
+}
+
+// returns tip amount and quality multiplier based on stock state
+function getStockModifier(item) {
+  const state = getStockState(item);
+
+  if (state === "fresh") return { tip: 2, multiplier: 1 };
+  if (state === "warning") return { tip: 1, multiplier: 1 };
+  return { tip: 0, multiplier: 0 }; // spoiled
+}
+
+// process production queues for products and move to stock when done
+function processProductionQueue() {
+  Object.keys(state.products).forEach((key) => {
+    const product = state.products[key];
+    if (!product.productionQueue) return;
+
+    const now = Date.now();
+
+    product.productionQueue = product.productionQueue.filter((batch) => {
+      if (now >= batch.endTime) {
+        for (let i = 0; i < batch.qty * SERVINGS_PER_BATCH; i++) {
+          if (product.stock.length >= MAX_STOCK) break;
+          product.stock.push({ createdAt: Date.now() });
+        }
+        return false; // remove batch
+      }
+      return true;
+    });
+  });
 }
 
 // ======================
@@ -347,8 +410,6 @@ function renderInventoryContent() {
 function renderRecipesContent() {
   const coffeeStock = state.products.coffee.stock;
   const matchaLatteStock = state.products.matchaLatte.stock;
-  const coffeeIsProducing = state.products.coffee.isProducing;
-  const matchaIsProducing = state.products.matchaLatte.isProducing;
   const coffeeQty = state.recipes.coffee.qty;
   const matchaLatteQty = state.recipes.matchaLatte.qty;
   const coffeeTotalCost = coffeeQty * (PRICES.milk + PRICES.beans);
@@ -363,10 +424,6 @@ function renderRecipesContent() {
     matchaLatteQty > 0 &&
     state.items.milk >= matchaLatteQty &&
     state.items.matcha >= matchaLatteQty;
-  const canStartCoffee = coffeeQty > 0 && !coffeeIsProducing;
-  const coffeeIsReady = coffeeQty > 0;
-  const canStartMatchaLatte = matchaLatteQty > 0 && !matchaIsProducing;
-  const matchaIsReady = matchaLatteQty > 0;
   const coffeeMeta = stockMeta(coffeeStock.length);
   const coffeeHasSpoiled = state.products.coffee.stock.some(
     (item) => getStockState(item) === "spoiled",
@@ -381,12 +438,16 @@ function renderRecipesContent() {
       <div>Product</div>
       <div>Serve</div>
       <div>Qty</div>
-      <div></div>
+      <div>Actions</div>
+      <div>Production</div>
       <div>Stock</div>
     </div>
 
     <div class="row recipes ${coffeeMeta.rowClass}">
-      <div>Coffee <button data-action="quick-info" data-product="coffee">i</button></div>
+      <div>
+        <button class="info-btn" data-action="quick-info" data-product="coffee">i</button>
+          Coffee
+        </div>
       <div>$${SERVE_PRICE} / per serving</div>
 
     <div class="qty">
@@ -397,38 +458,58 @@ function renderRecipesContent() {
     </div>
 
     <div style="display:flex; gap:6px;">
-      <button data-action="make" data-product="coffee" 
-      class="${
-        coffeeIsProducing
-          ? "btn-green"
-          : coffeeIsReady
-            ? "btn-green"
-            : canAffordCoffee
-              ? "btn-yellow"
-              : "btn-red"
-      }"
-      >
-        ${
-          coffeeIsProducing
-            ? Math.ceil((state.products.coffee.endTime - Date.now()) / 1000) +
-              "s"
-            : "Make"
-        }
-      </button>
+      ${(() => {
+        const stateBtn = getMakeButtonState("coffee");
+        return `
+    <button 
+      data-action="make" 
+      data-product="coffee"
+      class="
+        ${stateBtn === "green" ? "btn-green" : ""}
+      "
+      ${stateBtn === "disabled" ? "disabled" : ""}
+    >
+      Make
+    </button>
+  `;
+      })()}
 
       <button 
         data-action="waste" 
         data-product="coffee" 
-        class="btn-red"
+        class="btn-waste"
         ${coffeeHasSpoiled ? "" : "disabled"}
       >
         Waste
       </button>
     </div>
 
+    <div>
+      ${
+        state.products.coffee.productionQueue.length
+          ? state.products.coffee.productionQueue
+              .map((b) => {
+                const remaining = Math.max(0, b.endTime - Date.now());
+                const total = b.endTime - b.startTime;
+                const progress = 1 - remaining / total;
+                const seconds = Math.ceil(remaining / 1000);
+
+                return `
+    <div class="prod-bar">
+      <div class="prod-fill" style="width:${progress * 100}%">
+        ${seconds}s
+      </div>
+    </div>
+  `;
+              })
+              .join("")
+          : "Idle"
+      }
+    </div>
+
     <div class="stock-cell">
       <div>
-        ${coffeeStock.length === 0 ? "Out of Stock" : coffeeStock.length}
+        ${coffeeStock.length === 0 ? "Item 86" : coffeeStock.length}
       </div>
         <div class="stock-blocks">
         ${state.products.coffee.stock
@@ -442,7 +523,10 @@ function renderRecipesContent() {
 </div>
 
     <div class="row recipes ${matchaMeta.rowClass}">
-      <div>Matcha Latte <button data-action="quick-info" data-product="matchaLatte">i</button></div>
+      <div>
+        <button class="info-btn" data-action="quick-info" data-product="matchaLatte">i</button>
+          Matcha Latte
+      </div>
         <div>$${SERVE_PRICE} / per serving</div>
 
     <div class="qty">
@@ -453,38 +537,58 @@ function renderRecipesContent() {
     </div>
 
     <div style="display:flex; gap:6px;">
-      <button data-action="make" data-product="matchaLatte" 
-      class="${
-        matchaIsProducing
-          ? "btn-green"
-          : matchaIsReady
-            ? "btn-green"
-            : canAffordMatcha
-              ? "btn-yellow"
-              : "btn-red"
-      }"
-      >
-        ${
-          matchaIsProducing
-            ? Math.ceil((state.products.matchaLatte.endTime - Date.now()) / 1000) +
-              "s"
-            : "Make"
-        }
-      </button>
+      ${(() => {
+        const stateBtn = getMakeButtonState("matchaLatte");
+        return `
+    <button 
+      data-action="make" 
+      data-product="matchaLatte"
+      class="
+        ${stateBtn === "green" ? "btn-green" : ""}
+      "
+      ${stateBtn === "disabled" ? "disabled" : ""}
+    >
+      Make
+    </button>
+  `;
+      })()}
 
-      <button 
-        data-action="waste" 
-        data-product="matchaLatte" 
-        class="btn-red"
-        ${matchaHasSpoiled ? "" : "disabled"}
+    <button 
+      data-action="waste" 
+      data-product="matchaLatte" 
+      class="btn-waste"
+      ${matchaHasSpoiled ? "" : "disabled"}
       >
         Waste
       </button>
     </div>
 
+    <div>
+      ${
+        state.products.matchaLatte.productionQueue.length
+          ? state.products.matchaLatte.productionQueue
+              .map((b) => {
+                const remaining = Math.max(0, b.endTime - Date.now());
+                const total = b.endTime - b.startTime;
+                const progress = 1 - remaining / total;
+                const seconds = Math.ceil(remaining / 1000);
+
+                return `
+    <div class="prod-bar">
+      <div class="prod-fill" style="width:${progress * 100}%">
+        ${seconds}s
+      </div>
+    </div>
+  `;
+              })
+              .join("")
+          : "Idle"
+      }
+    </div>
+
     <div class="stock-cell">
       <div>
-        ${matchaLatteStock.length === 0 ? "Out of Stock" : matchaLatteStock.length}
+        ${matchaLatteStock.length === 0 ? "Item 86" : matchaLatteStock.length}
       </div>
       <div class="stock-blocks">
         ${state.products.matchaLatte.stock
@@ -524,11 +628,15 @@ function renderCustomerPanel() {
       return `
       <div class="customer-panel" style="margin-bottom:12px;padding:10px;border:1px solid #ddd;border-radius:6px;">
         ${customer.name}: ${
-          customer.phase === "served"
-            ? customer.thankYou
-            : customer.phase === "expired"
-              ? customer.angry
-              : customer.dialogue
+          customer.phase === "bad"
+            ? "This tastes off..."
+            : customer.phase === "neutral"
+              ? "It's okay."
+              : customer.phase === "good"
+                ? customer.thankYou
+                : customer.phase === "expired"
+                  ? customer.angry
+                  : customer.dialogue
         }
 
         ${
@@ -587,11 +695,15 @@ function render() {
 
   mainBodyEl.innerHTML = `
     <div class="top-bar">
-      <div>Cash: $${state.cash}</div>
-      <div>Ready Servings: <span class="profit-value">${totalFinishedStock}</span></div>
-      <div>Expenses: $${state.expenses.ingredients + state.expenses.waste}</div>
-      <div style="opacity:0.7;">Waste: $${state.expenses.waste}</div>
-      <button data-action="toggle-info">Info</button>
+      <button data-action="view-cash">Cash: $${state.cash}</button>
+
+    <button data-action="view-servings">
+      Ready Servings: <span class="profit-value">${totalFinishedStock}</span>
+    </button>
+
+    <button data-action="view-expenses">
+      Expenses: $${state.expenses.ingredients + state.expenses.waste}
+    </button>
     </div>
 
     <div class="tabs">
@@ -610,24 +722,65 @@ function render() {
 
   // info panel content
 
-  infoBodyEl.innerHTML = `
-  <div class="summary-line"><strong>📊 Summary</strong></div>
-  <div class="summary-line">Coffee Stock: ${state.products.coffee.stock.length}</div>
-  <div class="summary-line">Matcha Latte Stock: ${state.products.matchaLatte.stock.length}</div>
-  <div class="summary-line">Serve Value: $${SERVE_PRICE} each</div>
+  const view = state.ui.activeInfoView;
 
-  <div class="summary-line" style="margin-top:12px;"><strong>☕ Coffee</strong></div>
-  <div class="summary-line">Servings Per stock: +5</div>
-  <div class="summary-line">Ingredients: 1 Milk + 1 Coffee Bean</div>
-  <div class="summary-line">Cost: $19</div>
-  <div class="summary-line">Production Time: 8s</div>
+  let infoContent = "";
 
-  <div class="summary-line" style="margin-top:12px;"><strong>🍵 Matcha Latte</strong></div>
-  <div class="summary-line">Servings Per stock: +5</div>
-  <div class="summary-line">Ingredients: 1 Milk + 1 Matcha</div>
-  <div class="summary-line">Cost: $22</div>
-  <div class="summary-line">Production Time: 15s</div>
-`;
+  if (view === "cash") {
+    const coffeeServed = state.products.coffee.totalServed || 0;
+    const matchaServed = state.products.matchaLatte.totalServed || 0;
+
+    const coffeeRevenue = coffeeServed * SERVE_PRICE;
+    const matchaRevenue = matchaServed * SERVE_PRICE;
+
+    const totalRevenue = coffeeRevenue + matchaRevenue;
+    const totalExpenses = state.expenses.ingredients + state.expenses.waste;
+    const profit = totalRevenue - totalExpenses;
+
+    infoContent = `
+    <div class="summary-line"><strong>💰 Profit Summary</strong></div>
+
+    <div class="summary-line">Coffee: ${coffeeServed} served → $${coffeeRevenue}</div>
+    <div class="summary-line">Matcha Latte: ${matchaServed} served → $${matchaRevenue}</div>
+
+    <div class="summary-line" style="margin-top:10px;">Revenue: $${totalRevenue}</div>
+    <div class="summary-line">Expenses: $${totalExpenses}</div>
+    <div class="summary-line"><strong>Net Profit: $${profit}</strong></div>
+  `;
+  }
+
+  if (view === "servings") {
+    infoContent = `
+    <div class="summary-line"><strong>☕ Coffee</strong></div>
+    <div class="summary-line">Stock: ${state.products.coffee.stock.length}</div>
+    <div class="summary-line">Production Time: 8s</div>
+    <div class="summary-line">Ingredients: Milk + Beans</div>
+    <div class="summary-line">Sell Price: $${SERVE_PRICE}</div>
+    <div class="summary-line">Batch Output: ${SERVINGS_PER_BATCH}</div>
+
+    <div class="summary-line" style="margin-top:12px;"><strong>🍵 Matcha Latte</strong></div>
+    <div class="summary-line">Stock: ${state.products.matchaLatte.stock.length}</div>
+    <div class="summary-line">Production Time: 15s</div>
+    <div class="summary-line">Ingredients: Milk + Matcha</div>
+    <div class="summary-line">Sell Price: $${SERVE_PRICE}</div>
+    <div class="summary-line">Batch Output: ${SERVINGS_PER_BATCH}</div>
+  `;
+  }
+
+  if (view === "expenses") {
+    const totalExpenses = state.expenses.ingredients + state.expenses.waste;
+
+    infoContent = `
+    <div class="summary-line"><strong>💸 Cost Breakdown</strong></div>
+
+    <div class="summary-line">Ingredients Cost: $${state.expenses.ingredients}</div>
+    <div class="summary-line">Waste Cost: $${state.expenses.waste}</div>
+
+    <div class="summary-line" style="margin-top:10px;"><strong>Total Expenses: $${totalExpenses}</strong></div>
+  `;
+  }
+
+  infoBodyEl.innerHTML = infoContent;
 }
 
 // serve product to customer
@@ -639,14 +792,33 @@ function serveProduct(productType, id) {
   if (!product || product.stock.length <= 0) return;
   if (customer.order !== productType) return;
 
-  const tip = calculateTip(customer);
+  const item = product.stock.shift(); // take 1 serving
+  const mod = getStockModifier(item);
 
-  product.stock.shift();
-  state.cash += customer.price + tip;
+  let base = customer.price;
+  let tip = calculateTip(customer);
 
-  showServePopup(customer.price + tip);
+  // apply stock logic
+  tip = Math.min(tip, mod.tip);
 
-  customer.phase = "served";
+  const finalAmount = base * mod.multiplier + tip;
+
+  // update customer mood based on stock quality
+  if (mod.multiplier === 0) {
+    customer.phase = "bad";
+  } else if (mod.tip === 1) {
+    customer.phase = "neutral";
+  } else {
+    customer.phase = "good";
+  }
+
+  // update cash and show popup
+  state.cash += finalAmount;
+  showServePopup(finalAmount);
+
+  // track served
+  state.products[productType].totalServed =
+    (state.products[productType].totalServed || 0) + 1;
 
   setTimeout(() => {
     const index = state.customer.list.indexOf(customer);
@@ -654,7 +826,7 @@ function serveProduct(productType, id) {
       state.customer.list.splice(index, 1);
       render();
     }
-  }, 1500);
+  }, 2500);
 
   render();
 }
@@ -735,28 +907,57 @@ function handleMainClick(event) {
   const action = target.dataset.action;
   const product = target.dataset.product;
 
+  // toggle info panel (removed)
   if (action === "toggle-info") {
     infoPanelEl.classList.toggle("hidden");
     return;
   }
 
+  // view quick info about product
   if (action === "quick-info") {
     if (!product) return;
     showQuickInfoPopup(product);
     return;
   }
 
+  // view cash details
+  if (action === "view-cash") {
+    state.ui.activeInfoView = "cash";
+    infoPanelEl.classList.remove("hidden");
+    render();
+    return;
+  }
+
+  // view servings details
+  if (action === "view-servings") {
+    state.ui.activeInfoView = "servings";
+    infoPanelEl.classList.remove("hidden");
+    render();
+    return;
+  }
+
+  // view expenses details
+  if (action === "view-expenses") {
+    state.ui.activeInfoView = "expenses";
+    infoPanelEl.classList.remove("hidden");
+    render();
+    return;
+  }
+
+  // serve product to customer
   if (action === "serve") {
     if (!product) return;
     serveProduct(product);
     return;
   }
 
+  // accept customer from top bar
   if (action === "accept-customer") {
     acceptCustomer();
     return;
   }
 
+  // serve customer action from customer panel
   if (action === "serve-customer") {
     const product = target.dataset.product;
     const id = target.dataset.id;
@@ -780,6 +981,7 @@ function handleMainClick(event) {
       (item) => getStockState(item) !== "spoiled",
     );
 
+    state.expenses.waste += wasteCost;
     state.cash -= wasteCost;
 
     render();
@@ -824,6 +1026,7 @@ function handleMainClick(event) {
     if (qty > 0 && state.cash >= total) {
       state.items[item] += qty;
       state.cash -= total;
+      state.expenses.ingredients += total;
       state.ui.purchaseQty[item] = 0;
       showPurchasedPopup();
       render();
@@ -835,35 +1038,36 @@ function handleMainClick(event) {
   if (action === "recipe-inc") {
     if (!product || !state.recipes[product]) return;
 
-    if (product === "matchaLatte") {
-      const nextQty = state.recipes[product].qty + 1;
-      const requiredMilk = nextQty;
-      const requiredMatcha = nextQty;
-      const missingMilk = Math.max(0, requiredMilk - state.items.milk);
-      const missingMatcha = Math.max(0, requiredMatcha - state.items.matcha);
-      const cost = missingMilk * PRICES.milk + missingMatcha * PRICES.matcha;
+    const currentQueue = state.products[product].productionQueue.length;
+    const nextQty = state.recipes[product].qty + 1;
 
-      if (state.cash >= cost) {
-        state.recipes[product].qty++;
-        render();
-      } else {
-        showpurchaseBlockedPopup("matchaLatte");
-      }
-    } else {
-      const nextQty = state.recipes[product].qty + 1;
-      const requiredMilk = nextQty;
-      const requiredBeans = nextQty;
-      const missingMilk = Math.max(0, requiredMilk - state.items.milk);
-      const missingBeans = Math.max(0, requiredBeans - state.items.beans);
-      const cost = missingMilk * PRICES.milk + missingBeans * PRICES.beans;
+    const requiredMilk = nextQty;
+    const requiredSecond = product === "matchaLatte" ? nextQty : nextQty;
 
-      if (state.cash >= cost) {
-        state.recipes[product].qty++;
-        render();
-      } else {
-        showpurchaseBlockedPopup("coffee");
-      }
+    // check production queue limit
+    if (state.products[product].productionQueue.length >= MAX_PRODUCTION_QUEUE) {
+      showProductionLimitPopup();
+      return;
     }
+
+    const missingMilk = Math.max(0, requiredMilk - state.items.milk);
+    const missingSecond =
+      product === "matchaLatte"
+        ? Math.max(0, requiredSecond - state.items.matcha)
+        : Math.max(0, requiredSecond - state.items.beans);
+
+    const cost =
+      missingMilk * PRICES.milk +
+      missingSecond *
+        (product === "matchaLatte" ? PRICES.matcha : PRICES.beans);
+
+    if (state.cash < cost) {
+      showpurchaseBlockedPopup(product);
+      return;
+    }
+
+    state.recipes[product].qty++;
+    render();
     return;
   }
 
@@ -881,100 +1085,92 @@ function handleMainClick(event) {
     if (!product || !state.recipes[product]) return;
 
     const productState = state.products[product];
-    if (!productState || productState.isProducing) return;
-
     const qty = state.recipes[product].qty;
     if (qty <= 0) return;
 
-    if (product === "matchaLatte") {
-      const missingMilk = Math.max(0, qty - state.items.milk);
-      const missingMatcha = Math.max(0, qty - state.items.matcha);
-      const autoBuyCost =
-        missingMilk * PRICES.milk + missingMatcha * PRICES.matcha;
+    const queuedStock = productState.productionQueue.reduce(
+      (sum, b) => sum + b.qty * SERVINGS_PER_BATCH,
+      0,
+    );
 
-      if (autoBuyCost > 0) {
-        if (state.cash >= autoBuyCost) {
-          state.items.milk += missingMilk;
-          state.items.matcha += missingMatcha;
-          state.cash -= autoBuyCost;
-          showPurchasedPopup();
-        } else {
-          showpurchaseBlockedPopup("matchaLatte");
-          return;
-        }
-      }
+    const totalFutureStock =
+      productState.stock.length + queuedStock + qty * SERVINGS_PER_BATCH;
 
-      if (!(state.items.milk >= qty && state.items.matcha >= qty)) {
-        showpurchaseBlockedPopup("matchaLatte");
-        return;
-      }
+    if (totalFutureStock > MAX_STOCK) {
+      showpurchaseBlockedPopup(product);
+      return;
+    }
 
-      if (qty > 0 && state.items.milk >= qty && state.items.matcha >= qty) {
-        state.items.milk -= qty;
-        state.items.matcha -= qty;
-        state.recipes[product].qty = 0;
-        productState.isProducing = true;
-        productState.endTime = Date.now() + MATCHA_LATTE_PRODUCTION_TIME_MS;
-        render();
+    const missingMilk = Math.max(0, qty - state.items.milk);
+    const missingSecond =
+      product === "matchaLatte"
+        ? Math.max(0, qty - state.items.matcha)
+        : Math.max(0, qty - state.items.beans);
 
-        setTimeout(() => {
-          for (let i = 0; i < qty * SERVINGS_PER_BATCH; i++) {
-            productState.stock.push({
-              createdAt: Date.now(),
-            });
-          }
+    const cost =
+      missingMilk * PRICES.milk +
+      missingSecond *
+        (product === "matchaLatte" ? PRICES.matcha : PRICES.beans);
 
-          productState.isProducing = false;
-          render();
-        }, MATCHA_LATTE_PRODUCTION_TIME_MS);
+    // AUTO PURCHASE (strict + predictable)
+    if (cost > state.cash) {
+      showpurchaseBlockedPopup(product);
+      return; // BLOCK EARLY
+    }
+
+    // buy missing ingredients
+    if (missingMilk > 0) {
+      state.items.milk += missingMilk;
+      state.cash -= missingMilk * PRICES.milk;
+      state.expenses.ingredients += missingMilk * PRICES.milk;
+    }
+
+    if (missingSecond > 0) {
+      if (product === "matchaLatte") {
+        state.items.matcha += missingSecond;
+        state.cash -= missingSecond * PRICES.matcha;
+        state.expenses.ingredients += missingSecond * PRICES.matcha;
       } else {
-        showpurchaseBlockedPopup("matchaLatte");
-      }
-    } else {
-      const missingMilk = Math.max(0, qty - state.items.milk);
-      const missingBeans = Math.max(0, qty - state.items.beans);
-      const autoBuyCost =
-        missingMilk * PRICES.milk + missingBeans * PRICES.beans;
-
-      if (autoBuyCost > 0) {
-        if (state.cash >= autoBuyCost) {
-          state.items.milk += missingMilk;
-          state.items.beans += missingBeans;
-          state.cash -= autoBuyCost;
-          showPurchasedPopup();
-        } else {
-          showpurchaseBlockedPopup("coffee");
-          return;
-        }
-      }
-
-      if (!(state.items.milk >= qty && state.items.beans >= qty)) {
-        showpurchaseBlockedPopup("coffee");
-        return;
-      }
-
-      if (qty > 0 && state.items.milk >= qty && state.items.beans >= qty) {
-        state.items.milk -= qty;
-        state.items.beans -= qty;
-        state.recipes[product].qty = 0;
-        productState.isProducing = true;
-        productState.endTime = Date.now() + COFFEE_PRODUCTION_TIME_MS;
-        render();
-
-        setTimeout(() => {
-          for (let i = 0; i < qty * SERVINGS_PER_BATCH; i++) {
-            productState.stock.push({
-              createdAt: Date.now(),
-            });
-          }
-
-          productState.isProducing = false;
-          render();
-        }, COFFEE_PRODUCTION_TIME_MS);
-      } else {
-        showpurchaseBlockedPopup("coffee");
+        state.items.beans += missingSecond;
+        state.cash -= missingSecond * PRICES.beans;
+        state.expenses.ingredients += missingSecond * PRICES.beans;
       }
     }
+
+    if (missingMilk > 0 || missingSecond > 0) {
+      showPurchasedPopup();
+    }
+
+    if (product === "matchaLatte") {
+      if (!(state.items.milk >= qty && state.items.matcha >= qty)) return;
+
+      state.items.milk -= qty;
+      state.items.matcha -= qty;
+    } else {
+      if (!(state.items.milk >= qty && state.items.beans >= qty)) return;
+
+      state.items.milk -= qty;
+      state.items.beans -= qty;
+    }
+
+    state.recipes[product].qty = 0;
+
+    if (productState.productionQueue.length >= MAX_PRODUCTION_QUEUE) {
+      showProductionLimitPopup();
+      return;
+    }
+
+    productState.productionQueue.push({
+      qty,
+      startTime: Date.now(),
+      endTime:
+        Date.now() +
+        (product === "matchaLatte"
+          ? MATCHA_LATTE_PRODUCTION_TIME_MS
+          : COFFEE_PRODUCTION_TIME_MS),
+    });
+
+    render();
   }
 }
 
@@ -1038,13 +1234,10 @@ function init() {
   // lightweight UI updates
   setInterval(updateCustomerProgressBar, 100);
 
+  // process production queues and move to stock when done
   setInterval(() => {
-    if (
-      state.products.coffee.isProducing ||
-      state.products.matchaLatte.isProducing
-    ) {
-      render();
-    }
+    processProductionQueue(); // ✅ NEW
+    render();
   }, 500);
 }
 

@@ -87,12 +87,15 @@ body {
   grid-template-columns: 1fr 140px 120px 100px 160px;
 }
 
-.table-head.recipes {
-  grid-template-columns: 1fr 100px 140px 100px 160px;
-}
-
+.table-head.recipes,
 .row.recipes {
-  grid-template-columns: 1fr 100px 140px 100px 160px;
+  grid-template-columns:
+    2.5fr /* Product */
+    2.5fr /* Serve */
+    120px /* Qty (small) */
+    120px /* Actions */
+    120px /* Production */
+    1.4fr; /* Stock */
 }
 
 .table-head {
@@ -124,6 +127,12 @@ body {
 .row > div:not(:last-child) {
   border-right: 1px solid #f3f4f6;
   padding-right: 8px;
+}
+
+.row.recipes > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* ======================
@@ -188,9 +197,15 @@ body {
   align-items: center;
 }
 
-.stock-block.fresh { background: #22c55e; }
-.stock-block.warning { background: #eab308; }
-.stock-block.spoiled { background: #ef4444; }
+.stock-block.fresh {
+  background: #22c55e;
+}
+.stock-block.warning {
+  background: #eab308;
+}
+.stock-block.spoiled {
+  background: #ef4444;
+}
 
 /* ======================
    SMALL UI ELEMENTS
@@ -236,6 +251,26 @@ body {
   background: rgba(0, 0, 0, 0.1);
 }
 
+.prod-bar {
+  width: 100%;
+  height: 18px;
+  background: #eee;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.prod-fill {
+  height: 100%;
+  background: #22c55e;
+  color: #fff;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: width 0.3s linear;
+}
+
 /* ======================
    BUTTONS / COLORS
 ====================== */
@@ -274,6 +309,40 @@ button:active {
   color: #fff;
 }
 
+.btn-waste {
+  background: black;
+  color: white;
+}
+
+.btn-waste:hover {
+  background: #ef4444;
+}
+
+.btn-green { background: #22c55e; color: #fff; }
+.btn-yellow { background: #eab308; color: #111; }
+.btn-red { background: #ef4444; color: #fff; }
+
+/* ======================
+   INFO BUTTON
+====================== */
+
+.info-btn {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #9ca3af;
+  color: #e5e7eb;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.info-btn:hover {
+  opacity: 0.6;
+}
+
 /* ======================
    ANIMATIONS
 ====================== */
@@ -282,13 +351,23 @@ button:active {
 }
 
 @keyframes shake {
-  0% { transform: translateX(0); }
-  25% { transform: translateX(-4px); }
-  50% { transform: translateX(4px); }
-  75% { transform: translateX(-4px); }
-  100% { transform: translateX(0); }
+  0% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-4px);
+  }
+  50% {
+    transform: translateX(4px);
+  }
+  75% {
+    transform: translateX(-4px);
+  }
+  100% {
+    transform: translateX(0);
+  }
 }
-  
+
 .sell-progress {
   height: 4px;
   width: 100%;
